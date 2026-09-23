@@ -9,7 +9,7 @@
        ============================================================ -->
   <xacro:property name="wheelbase"    value="0.173"/>
   <xacro:property name="track_width"  value="0.1745"/>
-  <xacro:property name="wheel_radius" value="0.03415"/>
+  <xacro:property name="wheel_radius" value="0.0299"/>
   <xacro:property name="wheel_width"  value="0.025"/>
 
   <!-- LIDAR -->

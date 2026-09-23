@@ -77,8 +77,8 @@ constexpr uint8_t SERVO_PWM_RESOLUTION = 16;
 
 // Vehicle physical parameters
 // TODO: refine these values with precise measurements in Phase 5 (System ID)
-constexpr float WHEEL_RADIUS_M = 0.03415f; // (specific for my motor)
-constexpr float WHEELBASE_M = 0.173f;    // "passo della macchina" (specific for my motor)
+constexpr float WHEEL_RADIUS_M = 0.0299f;  // slick tires, driven straight runs (step 5.5)
+constexpr float WHEELBASE_M = 0.173f;      // measured
 constexpr float TRACK_WIDTH_M = 0.1745f;   // (specific for my motor)
 constexpr int ENCODER_TICKS_PER_REV = 660; // measured (specific for my motor)
 constexpr float GEAR_RATIO = 1.0f;

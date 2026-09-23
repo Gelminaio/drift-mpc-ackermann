@@ -14,7 +14,7 @@ class OdometryNode(Node):
         super().__init__('ackermann_odometry')
 
         self.declare_parameter('wheelbase', 0.173)
-        self.declare_parameter('wheel_radius', 0.03415)
+        self.declare_parameter('wheel_radius', 0.0299)
         self.declare_parameter('odom_frame', 'odom')
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('publish_tf', True)
