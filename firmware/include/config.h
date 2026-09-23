@@ -91,7 +91,7 @@ constexpr float PID_KP_INITIAL = 1500.0f; // tuned manually, validated 0.2/0.5/1
 constexpr float PID_KI_INITIAL = 6000.0f;
 constexpr float PID_KD_INITIAL = 30.0f; // small D on EMA-filtered measurement
 
-constexpr float PID_INTEGRAL_CLAMP = 800.0f;
+constexpr float PID_INTEGRAL_CLAMP = MOTOR_DUTY_MAX / PID_KI_INITIAL; // Ki * clamp = full duty
 
 constexpr int16_t PID_OUTPUT_MIN = -1023;
 constexpr int16_t PID_OUTPUT_MAX = +1023;
