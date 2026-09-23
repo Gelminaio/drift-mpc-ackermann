@@ -9,6 +9,7 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rmw_microros/rmw_microros.h>
 
 #include <sensor_msgs/msg/joint_state.h>
 #include <sensor_msgs/msg/imu.h>
@@ -109,13 +110,10 @@ namespace comms
         }
     }
 
-    bool MicroRosNode::begin()
+    void MicroRosNode::begin()
     {
         set_microros_serial_transports(Serial);
         delay(2000);
-
-        agent_connected_ = createEntities();
-        return agent_connected_;
     }
 
     bool MicroRosNode::createEntities()
@@ -193,16 +191,19 @@ namespace comms
 
     void MicroRosNode::destroyEntities()
     {
+        // the agent may be gone: don't wait for it to confirm each deletion
+        rmw_context_t *rmw_context = rcl_context_get_rmw_context(&support.context);
+        (void)rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0);
+
         rcl_publisher_fini(&pub_joint, &node);
         rcl_publisher_fini(&pub_imu, &node);
         rcl_publisher_fini(&pub_steering, &node);
         rcl_subscription_fini(&sub_cmdvel, &node);
         rcl_subscription_fini(&sub_arm, &node);
+        rcl_subscription_fini(&sub_drive, &node);
         rclc_executor_fini(&executor);
         rcl_node_fini(&node);
         rclc_support_fini(&support);
-        rcl_subscription_fini(&sub_drive, &node);
-        agent_connected_ = false;
     }
 
     void MicroRosNode::publishJointStates()
@@ -250,25 +251,53 @@ namespace comms
 
     void MicroRosNode::spinOnce()
     {
-        if (!agent_connected_)
+        const uint32_t now = millis();
+
+        switch (state_)
         {
-            agent_connected_ = createEntities();
-            if (!agent_connected_)
+        case AgentState::WAITING:
+            if (rmw_uros_ping_agent(100, 1) == RMW_RET_OK)
+                state_ = AgentState::AVAILABLE;
+            break;
+
+        case AgentState::AVAILABLE:
+            if (createEntities())
+            {
+                state_ = AgentState::CONNECTED;
+            }
+            else
             {
                 destroyEntities();
-                return;
+                state_ = AgentState::WAITING;
             }
-        }
+            break;
 
-        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+        case AgentState::CONNECTED:
+            if (now - last_ping_ms_ >= 500)
+            {
+                last_ping_ms_ = now;
+                if (rmw_uros_ping_agent(100, 3) != RMW_RET_OK)
+                {
+                    state_ = AgentState::DISCONNECTED;
+                    break;
+                }
+            }
 
-        const uint32_t now = millis();
-        if (now - last_publish_ms_ >= 20)
-        {
-            last_publish_ms_ = now;
-            publishJointStates();
-            publishImu();
-            publishSteering();
+            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+
+            if (now - last_publish_ms_ >= 20)
+            {
+                last_publish_ms_ = now;
+                publishJointStates();
+                publishImu();
+                publishSteering();
+            }
+            break;
+
+        case AgentState::DISCONNECTED:
+            destroyEntities();
+            state_ = AgentState::WAITING;
+            break;
         }
     }
 }
