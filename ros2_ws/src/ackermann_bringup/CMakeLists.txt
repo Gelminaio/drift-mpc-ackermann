@@ -10,7 +10,7 @@ find_package(ament_cmake REQUIRED)
 
 # install launch files
 install(
-  DIRECTORY launch config
+  DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
 )
 

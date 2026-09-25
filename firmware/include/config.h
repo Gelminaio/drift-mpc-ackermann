@@ -76,7 +76,7 @@ constexpr uint32_t SERVO_PWM_FREQ_HZ = 50;
 constexpr uint8_t SERVO_PWM_RESOLUTION = 16;
 
 // Vehicle physical parameters
-// TODO: refine these values with precise measurements in Phase 5 (System ID)
+// wheelbase, track and radius: same as ros2_ws/src/ackermann_description/config/vehicle_params.yaml
 constexpr float WHEEL_RADIUS_M = 0.0299f;  // slick tires, driven straight runs (step 5.5)
 constexpr float WHEELBASE_M = 0.173f;      // measured
 constexpr float TRACK_WIDTH_M = 0.1745f;   // (specific for my motor)
