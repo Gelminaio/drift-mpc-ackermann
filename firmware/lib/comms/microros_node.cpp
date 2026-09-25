@@ -9,6 +9,7 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rmw_microros/rmw_microros.h>
 
 #include <sensor_msgs/msg/joint_state.h>
 #include <sensor_msgs/msg/imu.h>
@@ -16,6 +17,7 @@
 #include <rosidl_runtime_c/string_functions.h>
 #include <std_msgs/msg/bool.h>
 #include <std_msgs/msg/float32.h>
+#include <ackermann_msgs/msg/ackermann_drive.h>
 
 #include <math.h>
 
@@ -32,6 +34,8 @@ namespace comms
     static rcl_subscription_t sub_cmdvel;
 
     static rcl_subscription_t sub_arm;
+    static rcl_subscription_t sub_drive;
+    static ackermann_msgs__msg__AckermannDrive msg_drive;
     static std_msgs__msg__Bool msg_arm;
 
     static sensor_msgs__msg__JointState msg_joint;
@@ -73,6 +77,25 @@ namespace comms
         g_safety.notifyCommand(millis());
     }
 
+    static void drive_callback(const void *msgin)
+    {
+        const ackermann_msgs__msg__AckermannDrive *m =
+            static_cast<const ackermann_msgs__msg__AckermannDrive *>(msgin);
+
+        float steering_deg = m->steering_angle * 180.0f / static_cast<float>(M_PI);
+        if (steering_deg > SERVO_ANGLE_MAX_DEG)
+            steering_deg = SERVO_ANGLE_MAX_DEG;
+        if (steering_deg < SERVO_ANGLE_MIN_DEG)
+            steering_deg = SERVO_ANGLE_MIN_DEG;
+        g_servo.setAngle(steering_deg);
+
+        const float v = m->speed;
+        g_vehicle_state.wheel_left.velocity_setpoint_mps = v;
+        g_vehicle_state.wheel_right.velocity_setpoint_mps = v;
+
+        g_safety.notifyCommand(millis());
+    }
+
     static void arm_callback(const void *msgin)
     {
         const std_msgs__msg__Bool *m = static_cast<const std_msgs__msg__Bool *>(msgin);
@@ -87,13 +110,10 @@ namespace comms
         }
     }
 
-    bool MicroRosNode::begin()
+    void MicroRosNode::begin()
     {
         set_microros_serial_transports(Serial);
         delay(2000);
-
-        agent_connected_ = createEntities();
-        return agent_connected_;
     }
 
     bool MicroRosNode::createEntities()
@@ -136,7 +156,13 @@ namespace comms
                 "arm")))
             return false;
 
-        if (!rcl_ok(rclc_executor_init(&executor, &support.context, 2, &allocator)))
+        if (!rcl_ok(rclc_subscription_init_default(
+                &sub_drive, &node,
+                ROSIDL_GET_MSG_TYPE_SUPPORT(ackermann_msgs, msg, AckermannDrive),
+                "drive")))
+            return false;
+
+        if (!rcl_ok(rclc_executor_init(&executor, &support.context, 3, &allocator)))
             return false;
         if (!rcl_ok(rclc_executor_add_subscription(
                 &executor, &sub_cmdvel, &msg_cmdvel,
@@ -145,6 +171,10 @@ namespace comms
         if (!rcl_ok(rclc_executor_add_subscription(
                 &executor, &sub_arm, &msg_arm,
                 &arm_callback, ON_NEW_DATA)))
+            return false;
+        if (!rcl_ok(rclc_executor_add_subscription(
+                &executor, &sub_drive, &msg_drive,
+                &drive_callback, ON_NEW_DATA)))
             return false;
 
         msg_joint.position.data = joint_positions;
@@ -161,15 +191,19 @@ namespace comms
 
     void MicroRosNode::destroyEntities()
     {
+        // the agent may be gone: don't wait for it to confirm each deletion
+        rmw_context_t *rmw_context = rcl_context_get_rmw_context(&support.context);
+        (void)rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0);
+
         rcl_publisher_fini(&pub_joint, &node);
         rcl_publisher_fini(&pub_imu, &node);
         rcl_publisher_fini(&pub_steering, &node);
         rcl_subscription_fini(&sub_cmdvel, &node);
         rcl_subscription_fini(&sub_arm, &node);
+        rcl_subscription_fini(&sub_drive, &node);
         rclc_executor_fini(&executor);
         rcl_node_fini(&node);
         rclc_support_fini(&support);
-        agent_connected_ = false;
     }
 
     void MicroRosNode::publishJointStates()
@@ -217,25 +251,53 @@ namespace comms
 
     void MicroRosNode::spinOnce()
     {
-        if (!agent_connected_)
+        const uint32_t now = millis();
+
+        switch (state_)
         {
-            agent_connected_ = createEntities();
-            if (!agent_connected_)
+        case AgentState::WAITING:
+            if (rmw_uros_ping_agent(100, 1) == RMW_RET_OK)
+                state_ = AgentState::AVAILABLE;
+            break;
+
+        case AgentState::AVAILABLE:
+            if (createEntities())
+            {
+                state_ = AgentState::CONNECTED;
+            }
+            else
             {
                 destroyEntities();
-                return;
+                state_ = AgentState::WAITING;
             }
-        }
+            break;
 
-        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+        case AgentState::CONNECTED:
+            if (now - last_ping_ms_ >= 500)
+            {
+                last_ping_ms_ = now;
+                if (rmw_uros_ping_agent(100, 3) != RMW_RET_OK)
+                {
+                    state_ = AgentState::DISCONNECTED;
+                    break;
+                }
+            }
 
-        const uint32_t now = millis();
-        if (now - last_publish_ms_ >= 20)
-        {
-            last_publish_ms_ = now;
-            publishJointStates();
-            publishImu();
-            publishSteering();
+            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+
+            if (now - last_publish_ms_ >= 20)
+            {
+                last_publish_ms_ = now;
+                publishJointStates();
+                publishImu();
+                publishSteering();
+            }
+            break;
+
+        case AgentState::DISCONNECTED:
+            destroyEntities();
+            state_ = AgentState::WAITING;
+            break;
         }
     }
 }

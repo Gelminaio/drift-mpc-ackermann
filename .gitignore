@@ -17,6 +17,11 @@ build/
 install/
 log/
 
+# Data (bags and extracted parquet, not versioned)
+data/
+*.mcap
+*.parquet
+
 # OS
 .DS_Store
 Thumbs.db

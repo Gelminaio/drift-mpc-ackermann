@@ -76,9 +76,9 @@ constexpr uint32_t SERVO_PWM_FREQ_HZ = 50;
 constexpr uint8_t SERVO_PWM_RESOLUTION = 16;
 
 // Vehicle physical parameters
-// TODO: refine these values with precise measurements in Phase 5 (System ID)
-constexpr float WHEEL_RADIUS_M = 0.03415f; // (specific for my motor)
-constexpr float WHEELBASE_M = 0.173f;    // "passo della macchina" (specific for my motor)
+// wheelbase, track and radius: same as ros2_ws/src/ackermann_description/config/vehicle_params.yaml
+constexpr float WHEEL_RADIUS_M = 0.0299f;  // slick tires, driven straight runs (step 5.5)
+constexpr float WHEELBASE_M = 0.173f;      // measured
 constexpr float TRACK_WIDTH_M = 0.1745f;   // (specific for my motor)
 constexpr int ENCODER_TICKS_PER_REV = 660; // measured (specific for my motor)
 constexpr float GEAR_RATIO = 1.0f;
@@ -91,7 +91,7 @@ constexpr float PID_KP_INITIAL = 1500.0f; // tuned manually, validated 0.2/0.5/1
 constexpr float PID_KI_INITIAL = 6000.0f;
 constexpr float PID_KD_INITIAL = 30.0f; // small D on EMA-filtered measurement
 
-constexpr float PID_INTEGRAL_CLAMP = 800.0f;
+constexpr float PID_INTEGRAL_CLAMP = MOTOR_DUTY_MAX / PID_KI_INITIAL; // Ki * clamp = full duty
 
 constexpr int16_t PID_OUTPUT_MIN = -1023;
 constexpr int16_t PID_OUTPUT_MAX = +1023;

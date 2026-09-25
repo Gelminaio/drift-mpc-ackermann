@@ -1,7 +1,0 @@
-ackermann_odometry:
-  ros__parameters:
-    wheelbase: 0.173
-    wheel_radius: 0.03415
-    odom_frame: odom
-    base_frame: base_footprint
-    publish_tf: true

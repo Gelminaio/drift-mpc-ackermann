@@ -1,0 +1,42 @@
+# Vehicle parameters from Phase 5. SI units, angles in rad.
+# Read by the URDF (geometry) and passed to the nodes by ackermann_bringup.
+# The firmware keeps its own copy of wheelbase, track and wheel radius (config.h).
+/**:
+  ros__parameters:
+    # geometry, tape
+    wheelbase: 0.173        # +-1 mm, 2026-07-16
+    track: 0.1745           # +-1 mm, 2026-05-30
+    # slicks, 3 driven straight runs (kinematic_model.ipynb, 2026-09-23)
+    wheel_radius: 0.0299    # sd 0.03 mm
+
+    # as driven: slicks, LiPo, powerbank, Pi, lidar (inertia.ipynb, 2026-09-23)
+    mass: 2.015             # +-5 g, scale
+    lf: 0.0986              # +-0.1 mm, axle loads
+    lr: 0.0744              # +-0.1 mm
+    h_cg: 0.067             # +-3 mm, tilted axle load
+    iz: 0.0125              # +-2.3%, bifilar pendulum
+
+    # steering, bicycle angle vs command. Static ruler up to 0.35 (+-0.3 deg, ~2 deg play
+    # when standing), in motion from 0.40 (tan d = L r / v_x, sd 0.3-0.6 deg), 2-3 deg
+    # above static (kinematic_model.ipynb 2026-09-23, system_identification.ipynb 2026-09-25)
+    steer_cmd: [-0.52, -0.30, -0.15, 0.0, 0.15, 0.30, 0.35, 0.40, 0.46, 0.52]
+    steer_angle: [-0.3808, -0.2435, -0.1232, 0.0110, 0.1628, 0.3112, 0.3473, 0.4321, 0.4623, 0.5044]
+    steer_lag: 0.169        # s, +-0.016, first order, fitted with the tires
+    steer_rate_max: 4.36    # rad/s, 250 deg/s at the front-left wheel, servo lifted, no load
+
+    # wheel speed loop, Kp 1500 Ki 6000 (actuator_id.ipynb, 2026-09-23)
+    speed_lag_v: [0.26, 0.52, 0.87]    # m/s
+    speed_lag: [0.015, 0.030, 0.045]   # s, actuator; /joint_states adds a 45 ms EMA
+    v_max: 1.20             # m/s on slicks, motor free speed (envelope.ipynb, 2026-09-23)
+
+    # slicks on tiles (system_identification.ipynb, 2026-09-25)
+    # front: Fy = mu_f Nf sin(C atan(B_f alpha))
+    # rear, each wheel: F = mu_r Nr/2 sin(C atan(B_r |s|)) against its sliding direction,
+    # s = (v_x,i - u, v_y,i) / u with u the wheel surface speed
+    tire_mu_f: 0.449        # +-0.072
+    tire_b_f: 60.0          # on the fit bound, stiffer than the runs resolve
+    tire_mu_r: 0.315        # +-0.050
+    tire_b_r: 20.8          # +-3.1
+    tire_c: 0.678           # +-0.174
+    # mu and C correlate. At full slide mu sin(C pi/2): 0.393 +-0.004 front, 0.276 +-0.002 rear.
+    # Straight launches with wheelspin: 0.248 +-0.010 (handling.ipynb, 2026-09-25)

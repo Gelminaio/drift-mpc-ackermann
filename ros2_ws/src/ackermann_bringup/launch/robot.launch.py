@@ -10,7 +10,7 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     bringup = FindPackageShare('ackermann_bringup')
     description = FindPackageShare('ackermann_description')
-    params = PathJoinSubstitution([bringup, 'config', 'vehicle.yaml'])
+    params = PathJoinSubstitution([description, 'config', 'vehicle_params.yaml'])
 
     return LaunchDescription([
         DeclareLaunchArgument('use_lidar', default_value='true'),
