@@ -7,9 +7,11 @@
        base_link origin: center of rear axle, at wheel-hub height.
        Poses below are measured relative to base_link.
        ============================================================ -->
-  <xacro:property name="wheelbase"    value="0.173"/>
-  <xacro:property name="track_width"  value="0.1745"/>
-  <xacro:property name="wheel_radius" value="0.0299"/>
+  <xacro:property name="vehicle"
+    value="${xacro.load_yaml('$(find ackermann_description)/config/vehicle_params.yaml')['/**']['ros__parameters']}"/>
+  <xacro:property name="wheelbase"    value="${vehicle['wheelbase']}"/>
+  <xacro:property name="track_width"  value="${vehicle['track']}"/>
+  <xacro:property name="wheel_radius" value="${vehicle['wheel_radius']}"/>
   <xacro:property name="wheel_width"  value="0.025"/>
 
   <!-- LIDAR -->
