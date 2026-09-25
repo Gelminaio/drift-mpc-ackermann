@@ -10,7 +10,34 @@ MARKERS = {
     'pink': ((140, 90, 90), (175, 255, 255)),     # rear
     'green': ((45, 80, 70), (85, 255, 255)),      # front
 }
-MIN_AREA = 20   # px, smaller blobs are noise
+MIN_AREA = 20        # px, smaller blobs are noise
+STATIC_FRAC = 0.8    # a pixel in a marker color this often is part of the room, not the car
+SAMPLE_EVERY = 10    # frames sampled to find those pixels
+
+
+def color_masks(frame):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    return {name: cv2.inRange(hsv, np.array(lo), np.array(hi)) > 0 for name, (lo, hi) in MARKERS.items()}
+
+
+def static_masks(video_path):
+    # the markers move, objects of the same color in the room do not
+    cap = cv2.VideoCapture(video_path)
+    counts, n, i = None, 0, 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if i % SAMPLE_EVERY == 0:
+            masks = color_masks(frame)
+            if counts is None:
+                counts = {name: np.zeros(m.shape, np.int32) for name, m in masks.items()}
+            for name, m in masks.items():
+                counts[name] += m
+            n += 1
+        i += 1
+    kernel = np.ones((15, 15), np.uint8)
+    return {name: cv2.dilate((c > STATIC_FRAC * n).astype(np.uint8), kernel) > 0 for name, c in counts.items()}
 
 
 def frame_times(video_path):
@@ -24,6 +51,7 @@ def frame_times(video_path):
 
 def track(video_path):
     times = frame_times(video_path)
+    static = static_masks(video_path)
     cap = cv2.VideoCapture(video_path)
     rows = []
     i = 0
@@ -31,10 +59,9 @@ def track(video_path):
         ok, frame = cap.read()
         if not ok:
             break
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         row = {'t': times[i]}
-        for name, (lo, hi) in MARKERS.items():
-            mask = cv2.inRange(hsv, np.array(lo), np.array(hi))
+        for name, mask in color_masks(frame).items():
+            mask = (mask & ~static[name]).astype(np.uint8)
             n, _, stats, centroids = cv2.connectedComponentsWithStats(mask)
             areas = stats[1:, cv2.CC_STAT_AREA]
             if n > 1 and areas.max() >= MIN_AREA:
