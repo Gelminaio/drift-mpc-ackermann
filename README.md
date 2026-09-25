@@ -103,7 +103,7 @@ drift-mpc-ackermann/
 ├── docs/               # Technical documentation (MkDocs)
 ├── notebooks/          # System identification, data analysis, plots
 ├── scripts/            # Calibration, test, plotting utilities
-├── config/             # Shared YAML configs (vehicle params, EKF, MPC)
+├── config/             # Shared YAML configs (EKF, MPC)
 ├── media/              # Diagrams, photos, demo videos
 └── README.md
 ```
@@ -155,7 +155,7 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 2** — Infrastructure & repository setup
 - [x] **Phase 3** — ESP32 firmware: motor drivers, PID, IMU, micro-ROS
 - [x] **Phase 4** — ROS 2 bridge & sensor pipelines
-- [ ] **Phase 5** — Dynamic modeling & system identification (nonlinear tire model)
+- [x] **Phase 5** — Dynamic modeling & system identification (nonlinear tire model)
 - [ ] **Phase 6** — State estimation (EKF) & sideslip estimation
 - [ ] **Phase 7** — Track, racing line & baseline controller
 - [ ] **Phase 8** — Simulation & digital twin (friction randomization)
@@ -169,6 +169,25 @@ Track progress via [GitHub Milestones](../../milestones).
 ---
 
 ## Results
+
+### Phase 5 — System identification
+
+<p align="center">
+  <img src="media/drift_topview.png" alt="Full left lock, speed steps into a drift, overhead video" width="90%"/>
+</p>
+
+Slick PVC tires on tiles. Full left lock, wheel speed stepped up until the rear lets
+go (30 s): steady drift at 3.5 rad/s, CG sideslip -20 deg. Ground truth from an
+overhead phone video tracking two markers on the car, plus IMU and encoders.
+
+- Dynamic single-track model, spool rear axle (two slipping wheels), saturating tires.
+  Fitted on identification runs; 1 s ahead on validation runs: yaw rate NRMSE 11-17%,
+  sideslip error 1.4-1.6 deg in grip and 3.1-3.9 deg in the drift.
+- Rear friction at full slide 0.276 from the fit, 0.248 from straight launches with wheelspin.
+- Steering lag 0.17 s from command to yaw response, against 25-40 ms for the servo alone.
+- Every parameter with its uncertainty and source:
+  [`vehicle_params.yaml`](ros2_ws/src/ackermann_description/config/vehicle_params.yaml).
+  Analysis in [`notebooks/`](notebooks/).
 
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
