@@ -23,8 +23,9 @@ namespace drivers
 
         Wire.setClock(i2c_frequency_hz_);
 
-        // Enable the three reports we need, all at 200 Hz.
-        imu_.enableGameRotationVector(IMU_REPORT_INTERVAL_MS);  // I use Game Rotation Vector instead of Rotation Vector because it does not use magnetometer data, which is very noisy on our platform and causes bad fusion performance.
+        // Gyro and linear acceleration at 200 Hz. No orientation report: the BNO085 packs
+        // reports that come due together, the library parses only the first of a packet,
+        // and with three reports the accelerometer was lost 30% of the time (issue #74).
         imu_.enableLinearAccelerometer(IMU_REPORT_INTERVAL_MS); // accel w/o gravity
         imu_.enableGyro(IMU_REPORT_INTERVAL_MS);                // calibrated gyro
 
@@ -41,18 +42,13 @@ namespace drivers
         if (!initialized_)
             return false;
 
-        // one call parses one packet, and the three reports come at 600 packets/s:
-        // reading one per poll left the accelerometer stale for up to 1 s (issue #74)
+        // one call parses one packet: reading one per poll left the accelerometer
+        // stale for up to 1 s (issue #74)
         bool fresh = false;
         while (imu_.dataAvailable())
             fresh = true;
         if (!fresh)
             return false;
-
-        latest_.qw = imu_.getQuatReal();
-        latest_.qx = imu_.getQuatI();
-        latest_.qy = imu_.getQuatJ();
-        latest_.qz = imu_.getQuatK();
 
         latest_.lin_acc_x = imu_.getLinAccelX();
         latest_.lin_acc_y = imu_.getLinAccelY();
@@ -63,7 +59,6 @@ namespace drivers
         latest_.gyro_z = imu_.getGyroZ();
 
         latest_.timestamp_ms = millis();
-        latest_.accuracy = imu_.getQuatAccuracy();
         latest_.valid = true;
 
         return true;
