@@ -1,9 +1,20 @@
+import math
 import sys
 import os
 import pandas as pd
 from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
+
+
+def odometry(m):
+    # header stamp too: in a replay the bag time is the replay time, the stamp is the original
+    q = m.pose.pose.orientation
+    return {'stamp': m.header.stamp.sec + m.header.stamp.nanosec * 1e-9,
+            'x': m.pose.pose.position.x, 'y': m.pose.pose.position.y,
+            'yaw': 2 * math.atan2(q.z, q.w),
+            'vx': m.twist.twist.linear.x, 'vy': m.twist.twist.linear.y, 'wz': m.twist.twist.angular.z}
+
 
 # topics we care about for identification, and how to flatten each message
 FIELDS = {
@@ -18,10 +29,8 @@ FIELDS = {
         'ax': m.linear_acceleration.x, 'ay': m.linear_acceleration.y, 'az': m.linear_acceleration.z,
         'gx': m.angular_velocity.x, 'gy': m.angular_velocity.y, 'gz': m.angular_velocity.z,
     },
-    '/odom': lambda m: {
-        'x': m.pose.pose.position.x, 'y': m.pose.pose.position.y,
-        'vx': m.twist.twist.linear.x, 'wz': m.twist.twist.angular.z,
-    },
+    '/odom': odometry,
+    '/odometry/filtered': odometry,
     '/drive': lambda m: {'cmd_steer': m.steering_angle, 'cmd_speed': m.speed},
     '/cmd_vel': lambda m: {'cmd_vx': m.linear.x, 'cmd_wz': m.angular.z},
 }
