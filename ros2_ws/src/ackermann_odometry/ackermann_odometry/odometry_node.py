@@ -85,6 +85,7 @@ class OdometryNode(Node):
         odom.pose.covariance[7] = 0.05
         odom.pose.covariance[35] = 0.1
         odom.twist.covariance[0] = 0.02
+        odom.twist.covariance[7] = 0.02   # vy = 0 at the rear axle, sideslip < 1.5 deg in grip
         odom.twist.covariance[35] = 0.05
         self.pub_odom.publish(odom)
 

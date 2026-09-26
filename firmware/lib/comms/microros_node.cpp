@@ -185,6 +185,12 @@ namespace comms
         msg_joint.velocity.capacity = 2;
 
         rosidl_runtime_c__String__assign(&msg_imu.header.frame_id, "imu_link");
+        msg_imu.orientation_covariance[0] = -1.0; // no orientation (REP 145)
+        for (int i = 0; i < 3; i++)
+        {
+            msg_imu.angular_velocity_covariance[4 * i] = IMU_GYRO_VAR;
+            msg_imu.linear_acceleration_covariance[4 * i] = IMU_ACCEL_VAR;
+        }
 
         return true;
     }
