@@ -156,7 +156,7 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 3** — ESP32 firmware: motor drivers, PID, IMU, micro-ROS
 - [x] **Phase 4** — ROS 2 bridge & sensor pipelines
 - [x] **Phase 5** — Dynamic modeling & system identification (nonlinear tire model)
-- [ ] **Phase 6** — State estimation (EKF) & sideslip estimation
+- [x] **Phase 6** — State estimation (EKF) & sideslip estimation
 - [ ] **Phase 7** — Track, racing line & baseline controller
 - [ ] **Phase 8** — Simulation & digital twin (friction randomization)
 - [ ] **Phase 9** — Dynamic NMPC baseline at the limit of adhesion (acados)
@@ -188,6 +188,23 @@ overhead phone video tracking two markers on the car, plus IMU and encoders.
 - Every parameter with its uncertainty and source:
   [`vehicle_params.yaml`](ros2_ws/src/ackermann_description/config/vehicle_params.yaml).
   Analysis in [`notebooks/`](notebooks/).
+
+### Phase 6 — State estimation
+
+<p align="center">
+  <img src="media/ekf_square.png" alt="Rear axle path and heading on a square: video, odometry, robot_localization" width="90%"/>
+  <img src="media/sideslip_drift.png" alt="CG sideslip through two drifts: video against the estimates" width="90%"/>
+</p>
+
+- ESP32 clock synced to the Pi: IMU and encoder stamps arrive 7 ms old, steady.
+- The accelerometer was a stale copy of itself (60% repeated samples, up to 1.3 s): the
+  firmware read one IMU packet per poll. Fixed; its means now match the video within 0.1-0.3 m/s².
+- robot_localization with wheel speed and gyro, 2 laps of a 1.6 m square: heading within
+  5 deg and position within 0.2 m. Odometry alone ends 227 deg off (spool, tight turns).
+- Sideslip: the identified model driven by wheel speed and steering is within 1-2 deg of the
+  video in grip, 4-9 deg in a drift. The IMU cannot improve it there: once the tires slide,
+  yaw rate and acceleration barely change with sideslip. Lidar velocity comes in Phase 7.
+- [`notebooks/state_estimation.ipynb`](notebooks/state_estimation.ipynb).
 
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
