@@ -86,8 +86,8 @@ constexpr float GEAR_RATIO = 1.0f;
 // IMU driver constants
 constexpr uint16_t IMU_REPORT_INTERVAL_MS = 5; // 200hz
 
-// IMU noise while driving on tiles, steady steps at 0.6-0.8 m/s: gyro std 0.055-0.086 rad/s,
-// accel std 1.9-3.0 m/s2. At rest 0.002 and 0.05: it is vibration, not the sensor (step 6.2)
+// IMU noise while driving on tiles: gyro std 0.04-0.05 rad/s in grip, 0.17 in a drift; accel
+// std 1.7-2.2 m/s2 in grip, 2.4-3.0 in a drift. At rest 0.002 and 0.05: vibration (step 6.2)
 constexpr double IMU_GYRO_VAR = 0.07 * 0.07;  // (rad/s)^2
 constexpr double IMU_ACCEL_VAR = 2.5 * 2.5;   // (m/s^2)^2
 
