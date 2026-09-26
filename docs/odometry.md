@@ -1,7 +1,7 @@
 # Wheel odometry
 
 Forward Ackermann from /joint_states + /steering_angle, midpoint integration.
-Publishes /odom and odom -> base_footprint.
+Publishes /odom and odom -> base_footprint, stamped with /joint_states (docs/time_sync.md).
 
 ## Numbers
 

@@ -48,12 +48,12 @@ namespace comms
 
     static bool rcl_ok(rcl_ret_t rc) { return rc == RCL_RET_OK; }
 
-    // stamp from local uptime (not ROS-synced yet).
+    // agent (Pi) clock once rmw_uros_sync_session has run on this session
     static void set_stamp(builtin_interfaces__msg__Time &stamp)
     {
-        const uint32_t ms = millis();
-        stamp.sec = static_cast<int32_t>(ms / 1000);
-        stamp.nanosec = static_cast<uint32_t>((ms % 1000) * 1000000UL);
+        const int64_t ns = rmw_uros_epoch_nanos();
+        stamp.sec = static_cast<int32_t>(ns / 1000000000LL);
+        stamp.nanosec = static_cast<uint32_t>(ns % 1000000000LL);
     }
 
     static void cmdvel_callback(const void *msgin)
@@ -263,6 +263,8 @@ namespace comms
         case AgentState::AVAILABLE:
             if (createEntities())
             {
+                rmw_uros_sync_session(100);
+                last_sync_ms_ = now;
                 state_ = AgentState::CONNECTED;
             }
             else
@@ -281,6 +283,13 @@ namespace comms
                     state_ = AgentState::DISCONNECTED;
                     break;
                 }
+            }
+
+            // the ESP32 crystal drifts against the Pi clock
+            if (now - last_sync_ms_ >= 10000)
+            {
+                last_sync_ms_ = now;
+                rmw_uros_sync_session(100);
             }
 
             rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));

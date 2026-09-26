@@ -36,5 +36,6 @@ namespace comms
         AgentState state_ = AgentState::WAITING;
         uint32_t last_publish_ms_ = 0;
         uint32_t last_ping_ms_ = 0;
+        uint32_t last_sync_ms_ = 0;
     };
 }
