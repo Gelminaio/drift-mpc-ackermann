@@ -41,7 +41,12 @@ namespace drivers
         if (!initialized_)
             return false;
 
-        if (!imu_.dataAvailable())
+        // one call parses one packet, and the three reports come at 600 packets/s:
+        // reading one per poll left the accelerometer stale for up to 1 s (issue #74)
+        bool fresh = false;
+        while (imu_.dataAvailable())
+            fresh = true;
+        if (!fresh)
             return false;
 
         latest_.qw = imu_.getQuatReal();
