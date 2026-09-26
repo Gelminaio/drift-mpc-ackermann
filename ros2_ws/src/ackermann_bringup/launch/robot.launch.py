@@ -34,12 +34,22 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('use_camera')),
         ),
 
+        # the EKF owns odom -> base_footprint, so the odometry node does not publish it
         Node(
             package='ackermann_odometry',
             executable='odometry_node',
             name='ackermann_odometry',
             output='screen',
-            parameters=[params],
+            parameters=[params, {'publish_tf': False}],
+            condition=IfCondition(LaunchConfiguration('use_odometry')),
+        ),
+
+        Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_filter_node',
+            output='screen',
+            parameters=[PathJoinSubstitution([bringup, 'config', 'ekf.yaml'])],
             condition=IfCondition(LaunchConfiguration('use_odometry')),
         ),
     ])
