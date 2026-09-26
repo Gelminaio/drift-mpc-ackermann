@@ -3,7 +3,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetParameter
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -16,6 +16,8 @@ def generate_launch_description():
         DeclareLaunchArgument('use_lidar', default_value='true'),
         DeclareLaunchArgument('use_camera', default_value='true'),
         DeclareLaunchArgument('use_odometry', default_value='true'),
+        DeclareLaunchArgument('use_sim_time', default_value='false'),   # true to replay a bag
+        SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -34,12 +36,22 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('use_camera')),
         ),
 
+        # the EKF owns odom -> base_footprint, so the odometry node does not publish it
         Node(
             package='ackermann_odometry',
             executable='odometry_node',
             name='ackermann_odometry',
             output='screen',
-            parameters=[params],
+            parameters=[params, {'publish_tf': False}],
+            condition=IfCondition(LaunchConfiguration('use_odometry')),
+        ),
+
+        Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_filter_node',
+            output='screen',
+            parameters=[PathJoinSubstitution([bringup, 'config', 'ekf.yaml'])],
             condition=IfCondition(LaunchConfiguration('use_odometry')),
         ),
     ])

@@ -1,0 +1,27 @@
+# robot_localization baseline: wheel speed + gyro, 2D, owns odom -> base_footprint.
+# State order: x y z, roll pitch yaw, vx vy vz, vroll vpitch vyaw, ax ay az
+ekf_filter_node:
+  ros__parameters:
+    frequency: 50.0
+    two_d_mode: true
+    publish_tf: true
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom
+
+    # vx from the wheels, vy = 0 at the rear axle (grip only: in a drift it is wrong).
+    # The odometry yaw rate is not used, the spool makes it wrong in tight turns.
+    odom0: /odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, false,
+                   false, false, false]
+
+    # yaw rate only; the accelerometer is 2.5 m/s2 of vibration while driving
+    imu0: /imu/data_raw
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]

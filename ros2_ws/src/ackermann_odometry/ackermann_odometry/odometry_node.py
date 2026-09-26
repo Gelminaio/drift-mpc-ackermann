@@ -2,6 +2,7 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float32
 from nav_msgs.msg import Odometry
@@ -40,12 +41,13 @@ class OdometryNode(Node):
         self.steering = msg.data
 
     def joints_cb(self, msg):
-        now = self.get_clock().now()
+        # ESP32 stamp, synced to the agent clock (step 6.1)
+        stamp = Time.from_msg(msg.header.stamp)
         if self.last_time is None:
-            self.last_time = now
+            self.last_time = stamp
             return
-        dt = (now - self.last_time).nanoseconds * 1e-9
-        self.last_time = now
+        dt = (stamp - self.last_time).nanoseconds * 1e-9
+        self.last_time = stamp
         # skip bogus intervals (startup, agent reconnect)
         if dt <= 0.0 or dt > 0.5:
             return
@@ -63,7 +65,7 @@ class OdometryNode(Node):
         self.yaw = math.atan2(math.sin(self.yaw + yaw_rate * dt),
                               math.cos(self.yaw + yaw_rate * dt))
 
-        self.publish_odom(now, v, yaw_rate)
+        self.publish_odom(stamp, v, yaw_rate)
 
     def publish_odom(self, stamp, v, yaw_rate):
         qz = math.sin(self.yaw / 2.0)
@@ -83,6 +85,7 @@ class OdometryNode(Node):
         odom.pose.covariance[7] = 0.05
         odom.pose.covariance[35] = 0.1
         odom.twist.covariance[0] = 0.02
+        odom.twist.covariance[7] = 0.02   # vy = 0 at the rear axle, sideslip < 1.5 deg in grip
         odom.twist.covariance[35] = 0.05
         self.pub_odom.publish(odom)
 
