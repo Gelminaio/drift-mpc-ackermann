@@ -8,6 +8,7 @@ find_package(gz_plugin_vendor REQUIRED)
 find_package(gz-plugin REQUIRED COMPONENTS register)
 find_package(gz_sim_vendor REQUIRED)
 find_package(gz-sim REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -20,6 +21,7 @@ target_link_libraries(sim_car
   ${ackermann_msgs_TARGETS}
   gz-plugin::register
   gz-sim::gz-sim
+  ${nav_msgs_TARGETS}
   rclcpp::rclcpp
   ${sensor_msgs_TARGETS}
   ${std_msgs_TARGETS}

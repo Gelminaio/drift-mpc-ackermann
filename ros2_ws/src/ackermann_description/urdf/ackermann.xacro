@@ -141,7 +141,7 @@
       <origin xyz="${vehicle['lr']} 0 ${vehicle['h_cg'] - wheel_radius}" rpy="0 0 0"/>
     </joint>
 
-    <!-- ESP32 and car: /drive and /arm in, wheels, IMU and steering out -->
+    <!-- ESP32 and car: /drive and /arm in, wheels, IMU, steering and the true state out -->
     <gazebo>
       <plugin filename="sim_car" name="ackermann_gazebo::SimCar">
         <imu_x>${imu_x}</imu_x>
