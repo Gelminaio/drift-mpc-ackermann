@@ -4,12 +4,16 @@ import numpy as np
 import pandas as pd
 import rclpy
 from ackermann_msgs.msg import AckermannDrive
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import Imu, JointState
 from std_msgs.msg import Bool
 
-# /drive of a sysid run replayed open loop in the sim; gyro z and wheel speed recorded.
+from vehicle_model import LR
+
+# /drive of a sysid run replayed open loop in the sim; gyro z, wheel speed and the true
+# sideslip recorded.
 # usage, from the repo root with the sim running: python3 scripts/sim_replay.py <run> <out.parquet>
 run, out = sys.argv[1], sys.argv[2]
 df = pd.read_parquet(f'data/sysid/{run}.parquet')
@@ -34,6 +38,16 @@ def now():
 
 node.create_subscription(Imu, 'imu/data_raw', lambda m: rows.append(('gyro_z', stamp(m), m.angular_velocity.z)), 10)
 node.create_subscription(JointState, 'joint_states', lambda m: rows.append(('wheel', stamp(m), m.velocity[0])), 10)
+
+
+def truth(m):
+    # sideslip at the rear axle, and at the CG lr ahead of it [deg]
+    v = m.twist.twist
+    rows.append(('beta_rear', stamp(m), np.degrees(np.arctan2(v.linear.y, v.linear.x))))
+    rows.append(('beta_cg', stamp(m), np.degrees(np.arctan2(v.linear.y + LR * v.angular.z, v.linear.x))))
+
+
+node.create_subscription(Odometry, 'ground_truth', truth, 10)
 
 while pub_arm.get_subscription_count() == 0 or now() == 0:
     rclpy.spin_once(node, timeout_sec=0.1)
