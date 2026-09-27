@@ -16,6 +16,14 @@ def odometry(m):
             'vx': m.twist.twist.linear.x, 'vy': m.twist.twist.linear.y, 'wz': m.twist.twist.angular.z}
 
 
+def pose_cov(m):
+    q = m.pose.pose.orientation
+    c = m.pose.covariance
+    return {'stamp': m.header.stamp.sec + m.header.stamp.nanosec * 1e-9,
+            'x': m.pose.pose.position.x, 'y': m.pose.pose.position.y, 'yaw': 2 * math.atan2(q.z, q.w),
+            'var_x': c[0], 'var_y': c[7], 'var_yaw': c[35]}
+
+
 # topics we care about for identification, and how to flatten each message
 FIELDS = {
     '/joint_states': lambda m: {
@@ -31,6 +39,7 @@ FIELDS = {
     },
     '/odom': odometry,
     '/odometry/filtered': odometry,
+    '/amcl_pose': pose_cov,
     '/drive': lambda m: {'cmd_steer': m.steering_angle, 'cmd_speed': m.speed},
     '/cmd_vel': lambda m: {'cmd_vx': m.linear.x, 'cmd_wz': m.angular.z},
 }

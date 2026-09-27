@@ -1,0 +1,28 @@
+# nav2 AMCL on maps/room, run on the desktop. No Ackermann motion model in nav2:
+# the differential one takes the same odometry increments.
+amcl:
+  ros__parameters:
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    global_frame_id: map
+    scan_topic: scan
+    robot_model_type: nav2_amcl::DifferentialMotionModel
+    laser_model_type: likelihood_field
+    laser_min_range: 0.15
+    laser_max_range: 12.0          # RPLIDAR A1
+    max_beams: 90
+    min_particles: 300
+    max_particles: 2000
+    update_min_d: 0.05             # m
+    update_min_a: 0.1              # rad
+    transform_tolerance: 0.2
+    # odometry noise, default 0.2: the EKF drifts ~2% of the distance. On the replayed lap
+    # the correction per update drops from 1.6 / 6.3 / 9.9 cm (median / 95% / max) to
+    # 1.1 / 3.6 / 5.9 cm (docs/localization.md)
+    alpha1: 0.05
+    alpha2: 0.05
+    alpha3: 0.05
+    alpha4: 0.05
+    # the start mark on the floor, tape at the wheels, 7 cm into the track (docs/localization.md)
+    set_initial_pose: true
+    initial_pose: {x: 3.010, y: 0.350, z: 0.0, yaw: -0.801}

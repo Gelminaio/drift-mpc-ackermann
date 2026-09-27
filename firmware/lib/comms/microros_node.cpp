@@ -101,6 +101,9 @@ namespace comms
         const std_msgs__msg__Bool *m = static_cast<const std_msgs__msg__Bool *>(msgin);
         if (m->data)
         {
+            // start from rest: /drive keeps writing the setpoint while disarmed
+            g_vehicle_state.wheel_left.velocity_setpoint_mps = 0.0f;
+            g_vehicle_state.wheel_right.velocity_setpoint_mps = 0.0f;
             g_safety.clearEmergency();
             g_safety.arm();
         }
