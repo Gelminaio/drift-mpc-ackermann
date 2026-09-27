@@ -4,8 +4,10 @@ nav2 AMCL on `maps/room` (docs/mapping.md), run on the desktop:
 
     ros2 launch ackermann_bringup localization.launch.py
 
-It starts from the mark the map was made from, (3.17, -1.15, 45 deg): put the robot there,
-pointing the same way. Odometry is the robot_localization EKF (wheel speed + gyro).
+It starts from the first point of the track, (2.985, 0.420), facing along it (-42.5 deg): put
+the robot there. From the mark the map was made from, (3.17, -1.15, 45 deg), that is 0.97 m
+forward, 1.25 m to the left, turned 87 deg to the right. Odometry is the robot_localization
+EKF (wheel speed + gyro).
 
 ## Numbers
 
