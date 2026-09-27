@@ -23,6 +23,6 @@ amcl:
     alpha2: 0.05
     alpha3: 0.05
     alpha4: 0.05
-    # the start mark of the mapping run (docs/mapping.md)
+    # the start mark on the floor, tape at the wheels, 7 cm into the track (docs/localization.md)
     set_initial_pose: true
-    initial_pose: {x: 3.17, y: -1.15, z: 0.0, yaw: 0.78}
+    initial_pose: {x: 3.010, y: 0.350, z: 0.0, yaw: -0.801}
