@@ -16,6 +16,7 @@
 #include <gz/sim/Model.hh>
 #include <gz/sim/System.hh>
 #include <gz/sim/Util.hh>
+#include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
@@ -25,7 +26,7 @@
 
 // The ESP32 and the car in Gazebo. /drive and /arm in, /joint_states, /imu/data_raw and
 // /steering_angle out at 50 Hz as the firmware does; the car moves by the Phase 5 model
-// (scripts/vehicle_model.py), RK4 at the world step.
+// (scripts/vehicle_model.py), RK4 at the world step. /ground_truth: the true state.
 
 namespace ackermann_gazebo
 {
@@ -36,8 +37,12 @@ constexpr double SOFTSTOP_RAMP = 2.0;                 // m/s2
 constexpr double PID_DEADBAND = 0.02;                 // m/s, below it duty 0
 constexpr double SERVO_MAX = 30.0 * M_PI / 180.0;     // rad
 constexpr double WHEEL_EMA_TAU = 0.045;               // s, alpha 0.2 every 10 ms
-constexpr double GYRO_SD = 0.07;                      // rad/s
-constexpr double ACCEL_SD = 2.5;                      // m/s2
+constexpr double GYRO_VAR = 0.07 * 0.07;              // (rad/s)^2, reported
+constexpr double ACCEL_VAR = 2.5 * 2.5;               // (m/s2)^2, reported
+
+// IMU noise on tiles, sd at rest and growing with speed from vibration (pp_run1/3, 2026-09-27)
+constexpr double GYRO_SD_REST = 0.0014, GYRO_SD_PER_V = 0.063;    // rad/s, rad/s per m/s
+constexpr double ACCEL_SD_REST = 0.07, ACCEL_SD_PER_V = 3.0;      // m/s2, m/s2 per m/s
 
 constexpr double V_KIN = 0.1;    // m/s, below it the tire model is singular: roll without slip
 
@@ -119,7 +124,7 @@ public:
   }
 
   void Configure(const gz::sim::Entity & entity, const std::shared_ptr<const sdf::Element> & sdf,
-                 gz::sim::EntityComponentManager & ecm, gz::sim::EventManager &) override
+                 gz::sim::EntityComponentManager &, gz::sim::EventManager &) override
   {
     model_ = gz::sim::Model(entity);
     const YAML::Node y = YAML::LoadFile(ament_index_cpp::get_package_share_directory("ackermann_description") +
@@ -148,13 +153,6 @@ public:
     rho_x_ = sdf->Get<double>("imu_x") - p_.lr;
     rho_y_ = sdf->Get<double>("imu_y");
 
-    // spawned at rest; the model origin is base_footprint, on the rear axle
-    const gz::math::Pose3d pose = gz::sim::worldPose(entity, ecm);
-    x_.fill(0.0);
-    x_[PSI] = pose.Rot().Yaw();
-    x_[X] = pose.Pos().X() + p_.lr * std::cos(x_[PSI]);
-    x_[Y] = pose.Pos().Y() + p_.lr * std::sin(x_[PSI]);
-
     if (!rclcpp::ok()) {
       // Gazebo keeps its own Ctrl-C handling
       rclcpp::init(0, nullptr, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
@@ -163,6 +161,7 @@ public:
     pub_joints_ = node_->create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
     pub_imu_ = node_->create_publisher<sensor_msgs::msg::Imu>("imu/data_raw", 10);
     pub_steering_ = node_->create_publisher<std_msgs::msg::Float32>("steering_angle", 10);
+    pub_truth_ = node_->create_publisher<nav_msgs::msg::Odometry>("ground_truth", 10);
     sub_drive_ = node_->create_subscription<ackermann_msgs::msg::AckermannDrive>(
       "drive", 10, [this](const ackermann_msgs::msg::AckermannDrive & m) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -187,6 +186,16 @@ public:
   {
     if (info.paused) {
       return;
+    }
+    if (!spawned_) {
+      // at rest where `create` put it, which is after Configure. The model origin is
+      // base_footprint, on the rear axle
+      const gz::math::Pose3d pose = gz::sim::worldPose(model_.Entity(), ecm);
+      x_.fill(0.0);
+      x_[PSI] = pose.Rot().Yaw();
+      x_[X] = pose.Pos().X() + p_.lr * std::cos(x_[PSI]);
+      x_[Y] = pose.Pos().Y() + p_.lr * std::sin(x_[PSI]);
+      spawned_ = true;
     }
     const double now = std::chrono::duration<double>(info.simTime).count();
     const double h = std::chrono::duration<double>(info.dt).count();
@@ -269,30 +278,47 @@ private:
     pub_joints_->publish(joints);
 
     // imu_link is rotated -90 deg about z
+    const double gyro_sd = std::max(GYRO_SD_REST, GYRO_SD_PER_V * std::abs(x_[U]));
+    const double accel_sd = std::max(ACCEL_SD_REST, ACCEL_SD_PER_V * std::abs(x_[U]));
     sensor_msgs::msg::Imu imu;
     imu.header.stamp = stamp;
     imu.header.frame_id = "imu_link";
     imu.orientation_covariance[0] = -1.0;
-    imu.angular_velocity.x = GYRO_SD * noise_(rng_);
-    imu.angular_velocity.y = GYRO_SD * noise_(rng_);
-    imu.angular_velocity.z = r + GYRO_SD * noise_(rng_);
-    imu.linear_acceleration.x = ay + ACCEL_SD * noise_(rng_);
-    imu.linear_acceleration.y = -ax + ACCEL_SD * noise_(rng_);
-    imu.linear_acceleration.z = ACCEL_SD * noise_(rng_);
+    imu.angular_velocity.x = gyro_sd * noise_(rng_);
+    imu.angular_velocity.y = gyro_sd * noise_(rng_);
+    imu.angular_velocity.z = r + gyro_sd * noise_(rng_);
+    imu.linear_acceleration.x = ay + accel_sd * noise_(rng_);
+    imu.linear_acceleration.y = -ax + accel_sd * noise_(rng_);
+    imu.linear_acceleration.z = accel_sd * noise_(rng_);
     for (int i = 0; i < 3; i++) {
-      imu.angular_velocity_covariance[4 * i] = GYRO_SD * GYRO_SD;
-      imu.linear_acceleration_covariance[4 * i] = ACCEL_SD * ACCEL_SD;
+      imu.angular_velocity_covariance[4 * i] = GYRO_VAR;
+      imu.linear_acceleration_covariance[4 * i] = ACCEL_VAR;
     }
     pub_imu_->publish(imu);
 
     std_msgs::msg::Float32 steering;
     steering.data = servo;
     pub_steering_->publish(steering);
+
+    // base_footprint in the map, the world frame of room.sdf; velocities in base_footprint
+    nav_msgs::msg::Odometry truth;
+    truth.header.stamp = stamp;
+    truth.header.frame_id = "map";
+    truth.child_frame_id = "base_footprint";
+    truth.pose.pose.position.x = x_[X] - p_.lr * c;
+    truth.pose.pose.position.y = x_[Y] - p_.lr * s;
+    truth.pose.pose.orientation.z = std::sin(x_[PSI] / 2);
+    truth.pose.pose.orientation.w = std::cos(x_[PSI] / 2);
+    truth.twist.twist.linear.x = x_[VX];
+    truth.twist.twist.linear.y = x_[VY] - p_.lr * r;
+    truth.twist.twist.angular.z = r;
+    pub_truth_->publish(truth);
   }
 
   Params p_;
   gz::sim::Model model_;
   State x_;
+  bool spawned_ = false;
   double rho_x_, rho_y_;
   double wheel_ema_ = 0.0, wheel_angle_ = 0.0;     // m/s as /joint_states reports it, rad
   double vxw_prev_ = 0.0, vyw_prev_ = 0.0, r_prev_ = 0.0;
@@ -314,6 +340,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_joints_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_imu_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr pub_steering_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_truth_;
   rclcpp::Subscription<ackermann_msgs::msg::AckermannDrive>::SharedPtr sub_drive_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_arm_;
 };

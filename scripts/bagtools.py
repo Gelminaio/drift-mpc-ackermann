@@ -52,3 +52,20 @@ def imu_to_vehicle(df):
     out['ay_v'] = s * df['ax'] + c * df['ay']
     out['gz_v'] = df['gz']
     return out
+
+def map_pose(d):
+    """Rear axle in the map at the EKF rate, as the controller sees it: the last AMCL
+    correction applied to the EKF pose. Returns t, x, y."""
+    a, o = d['amcl_pose'], d['odometry_filtered']
+    oyaw = np.unwrap(o['yaw'].to_numpy())
+    # map -> odom at each AMCL update
+    ox, oy = np.interp(a['stamp'], o['stamp'], o['x']), np.interp(a['stamp'], o['stamp'], o['y'])
+    dyaw = a['yaw'].to_numpy() - np.interp(a['stamp'], o['stamp'], oyaw)
+    tx = a['x'].to_numpy() - (np.cos(dyaw) * ox - np.sin(dyaw) * oy)
+    ty = a['y'].to_numpy() - (np.sin(dyaw) * ox + np.cos(dyaw) * oy)
+    k = np.searchsorted(a['stamp'].to_numpy(), o['stamp'].to_numpy()) - 1
+    ok = k >= 0
+    k, x, y = k[ok], o['x'].to_numpy()[ok], o['y'].to_numpy()[ok]
+    X = tx[k] + np.cos(dyaw[k]) * x - np.sin(dyaw[k]) * y
+    Y = ty[k] + np.sin(dyaw[k]) * x + np.cos(dyaw[k]) * y
+    return o['t'].to_numpy()[ok], X, Y

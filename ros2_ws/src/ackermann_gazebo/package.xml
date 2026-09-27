@@ -13,6 +13,7 @@
   <depend>ament_index_cpp</depend>
   <depend>gz_plugin_vendor</depend>
   <depend>gz_sim_vendor</depend>
+  <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
