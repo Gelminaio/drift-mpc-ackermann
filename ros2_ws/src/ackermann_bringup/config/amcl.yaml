@@ -23,6 +23,6 @@ amcl:
     alpha2: 0.05
     alpha3: 0.05
     alpha4: 0.05
-    # the first point of maps/room_track.csv, facing along the track (docs/localization.md)
+    # the start mark on the floor, tape at the wheels, 7 cm into the track (docs/localization.md)
     set_initial_pose: true
-    initial_pose: {x: 2.985, y: 0.420, z: 0.0, yaw: -0.742}
+    initial_pose: {x: 3.010, y: 0.350, z: 0.0, yaw: -0.801}

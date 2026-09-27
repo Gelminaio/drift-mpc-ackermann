@@ -4,10 +4,12 @@ nav2 AMCL on `maps/room` (docs/mapping.md), run on the desktop:
 
     ros2 launch ackermann_bringup localization.launch.py
 
-It starts from the first point of the track, (2.985, 0.420), facing along it (-42.5 deg): put
-the robot there. From the mark the map was made from, (3.17, -1.15, 45 deg), that is 0.97 m
-forward, 1.25 m to the left, turned 87 deg to the right. Odometry is the robot_localization
-EKF (wheel speed + gyro).
+It starts from the start mark: tape at the rear wheels and the front left wheel, on the first
+straight of the track, (3.010, 0.350, -45.9 deg). The configured initial pose has no spread
+(all particles on one point), so the robot has to sit on the mark: the lidar alone, standing
+still, does not pull a wrong start back. Placed ~30 cm off by eye, AMCL took ~4 s of driving
+to correct it (bag `pp_run1`). The mark was set where AMCL put the robot after 3 laps.
+Odometry is the robot_localization EKF (wheel speed + gyro).
 
 ## Numbers
 
