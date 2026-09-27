@@ -157,7 +157,7 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 4** — ROS 2 bridge & sensor pipelines
 - [x] **Phase 5** — Dynamic modeling & system identification (nonlinear tire model)
 - [x] **Phase 6** — State estimation (EKF) & sideslip estimation
-- [ ] **Phase 7** — Track, racing line & baseline controller
+- [x] **Phase 7** — Track, racing line & baseline controller
 - [ ] **Phase 8** — Simulation & digital twin (friction randomization)
 - [ ] **Phase 9** — Dynamic NMPC baseline at the limit of adhesion (acados)
 - [ ] **Phase 10** — Online friction estimation
@@ -205,6 +205,20 @@ overhead phone video tracking two markers on the car, plus IMU and encoders.
   video in grip, 4-9 deg in a drift. The IMU cannot improve it there: once the tires slide,
   yaw rate and acceleration barely change with sideslip. Lidar velocity comes in Phase 7.
 - [`notebooks/state_estimation.ipynb`](notebooks/state_estimation.ipynb).
+
+### Phase 7 — Track and baseline controller
+
+<p align="center">
+  <img src="media/track_following.png" alt="Pure Pursuit on the racing line: paths on the room map and lateral error" width="90%"/>
+</p>
+
+- Map of the room with slam_toolbox, localization with AMCL on top of the EKF, on the Pi.
+- Racing line: the largest rounded rectangle 0.5 m clear of every wall, 8.8 m, 0.77-1.0 m/s
+  from a lateral limit of 1.0 m/s² (no drift).
+- Pure Pursuit, lookahead picked on the Phase 5 model with a delayed pose: 3 laps at full
+  speed, 10.1 s a lap, 2.7 cm rms from the line, 6-7 cm at worst.
+- [`notebooks/track_following.ipynb`](notebooks/track_following.ipynb), [`docs/mapping.md`](docs/mapping.md),
+  [`docs/localization.md`](docs/localization.md), [`docs/track.md`](docs/track.md).
 
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
