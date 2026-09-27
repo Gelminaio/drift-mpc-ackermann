@@ -89,7 +89,11 @@ class PurePursuitNode(Node):
             return
         age = self.get_clock().now() - Time.from_msg(tf.header.stamp)
         if age > Duration(seconds=self.p['max_pose_age']):
-            self.stop(f'pose {age.nanoseconds * 1e-9:.2f} s old')
+            if self.i is None:
+                # not started yet: wait for a fresh pose (localization lags while this starts)
+                self.pub_drive.publish(AckermannDrive())
+            else:
+                self.stop(f'pose {age.nanoseconds * 1e-9:.2f} s old')
             return
 
         x, y = tf.transform.translation.x, tf.transform.translation.y
