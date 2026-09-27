@@ -25,6 +25,8 @@ namespace tasks
         // entire word commands (checked before single character switch)
         if (trimmed == "arm")
         {
+            g_vehicle_state.wheel_left.velocity_setpoint_mps = 0.0f;
+            g_vehicle_state.wheel_right.velocity_setpoint_mps = 0.0f;
             g_safety.arm();
             return;
         }
