@@ -7,10 +7,8 @@ Requires=docker.service
 Restart=always
 RestartSec=3
 ExecStartPre=-/usr/bin/docker rm -f micro-ros-agent
-# --ipc=host: same /dev/shm as the host. With a private one, Fast DDS on the host tried
-# shared memory to the agent and a publish to /drive blocked for up to 0.35 s.
 ExecStart=/usr/bin/docker run --rm --name micro-ros-agent \
-  -v /dev:/dev --privileged --net=host --ipc=host \
+  -v /dev:/dev --privileged --net=host \
   microros/micro-ros-agent:jazzy \
   serial --dev /dev/esp32 -b 921600
 ExecStop=/usr/bin/docker stop micro-ros-agent
