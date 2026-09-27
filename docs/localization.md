@@ -28,3 +28,15 @@ deterministic run to run:
 | 180 beams | 1.8 / 6.5 / 10.5 | 0.40 / 1.35 | 10 cm, 6.2 deg |
 
 With alpha 0.05 the end pose is 2.5 cm from the mark (by eye: ~2 cm).
+
+## On the Pi
+
+Localization and the controller run on the Pi (`localization.launch.py`, `pure_pursuit.launch.py`
+in tmux): with AMCL and RViz on the desktop, the Pi streamed ~250 kB/s over wifi, the ping
+went to ~1 s and robot_localization missed its 50 Hz. With nothing pulled to the desktop,
+36 kB/s and 3 ms.
+
+Before a session, `fastdds shm clean`. Nodes killed without a clean shutdown leave Fast DDS
+shared memory ports behind, and a publish then blocked up to 0.32 s every ~30-60 s (one
+0.35 s stall stopped the controller on "pose 0.39 s old"). Cleaned: 0 blocks in 3000
+publishes, max 1.8 ms. Stop launches with Ctrl-C in their tmux window, not by killing it.
