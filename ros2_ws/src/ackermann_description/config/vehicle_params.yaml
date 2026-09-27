@@ -27,6 +27,8 @@
     # wheel speed loop, Kp 1500 Ki 6000 (actuator_id.ipynb, 2026-09-23)
     speed_lag_v: [0.26, 0.52, 0.87]    # m/s
     speed_lag: [0.015, 0.030, 0.045]   # s, actuator; /joint_states adds a 45 ms EMA
+    coast_lag: 0.078        # s, duty 0 (disarmed or setpoint 0): the gearmotor stops the wheels,
+                            # the tires slide. 75-80 ms in 3 Pure Pursuit stops (2026-09-27)
     v_max: 1.20             # m/s on slicks, motor free speed (envelope.ipynb, 2026-09-23)
 
     # slicks on tiles (system_identification.ipynb, 2026-09-25)

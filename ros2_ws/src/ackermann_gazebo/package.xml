@@ -9,6 +9,15 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>ackermann_msgs</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>gz_plugin_vendor</depend>
+  <depend>gz_sim_vendor</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>yaml-cpp</depend>
+
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>ackermann_description</exec_depend>
