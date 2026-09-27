@@ -27,6 +27,7 @@
 // The ESP32 and the car in Gazebo. /drive and /arm in, /joint_states, /imu/data_raw and
 // /steering_angle out at 50 Hz as the firmware does; the car moves by the Phase 5 model
 // (scripts/vehicle_model.py), RK4 at the world step. /ground_truth: the true state.
+// Parameter mu_scale: floor friction against the tiles, can change while driving.
 
 namespace ackermann_gazebo
 {
@@ -70,23 +71,27 @@ double interp(double x, const std::vector<double> & xs, const std::vector<double
   return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
 }
 
+// Floor friction mu_scale times the tiles: the peak force scales with it, the stiffness at
+// small slip does not (brush model), so mu -> mu_scale mu and B -> B / mu_scale.
+
 // one rear wheel at surface speed u: force against its sliding direction
-void rear_wheel(const Params & p, double vx, double vy, double u, double & fx, double & fy)
+void rear_wheel(const Params & p, double mu_scale, double vx, double vy, double u, double & fx, double & fy)
 {
   const double sx = (vx - u) / std::max(u, 0.1), sy = vy / std::max(u, 0.1);
   const double s = std::hypot(sx, sy) + 1e-9;
-  const double f = p.mu_r * p.nr / 2 * std::sin(p.c * std::atan(p.b_r * s));
+  const double f = mu_scale * p.mu_r * p.nr / 2 * std::sin(p.c * std::atan(p.b_r / mu_scale * s));
   fx = -f * sx / s;
   fy = -f * sy / s;
 }
 
-State deriv(const Params & p, const State & x, double d_cmd, double u_cmd, double tau_u)
+State deriv(const Params & p, double mu_scale, const State & x, double d_cmd, double u_cmd, double tau_u)
 {
   const double vx = std::max(x[VX], 0.05), vy = x[VY], r = x[R], d = x[D];
-  const double fyf = p.mu_f * p.nf * std::sin(p.c * std::atan(p.b_f * (d - std::atan((vy + p.lf * r) / vx))));
+  const double alpha_f = d - std::atan((vy + p.lf * r) / vx);
+  const double fyf = mu_scale * p.mu_f * p.nf * std::sin(p.c * std::atan(p.b_f / mu_scale * alpha_f));
   double fxl, fyl, fxr, fyr;
-  rear_wheel(p, vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
-  rear_wheel(p, vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
+  rear_wheel(p, mu_scale, vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
+  rear_wheel(p, mu_scale, vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
   const double fx = fxl + fxr - fyf * std::sin(d);
   const double fy = fyf * std::cos(d) + fyl + fyr;
   const double mz = p.lf * fyf * std::cos(d) - p.lr * (fyl + fyr) + p.track / 2 * (fxr - fxl);
@@ -158,6 +163,11 @@ public:
       rclcpp::init(0, nullptr, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
     }
     node_ = rclcpp::Node::make_shared("sim_car");
+    rcl_interfaces::msg::ParameterDescriptor range;
+    range.floating_point_range.resize(1);
+    range.floating_point_range[0].from_value = 0.1;
+    range.floating_point_range[0].to_value = 2.0;
+    node_->declare_parameter("mu_scale", 1.0, range);
     pub_joints_ = node_->create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
     pub_imu_ = node_->create_publisher<sensor_msgs::msg::Imu>("imu/data_raw", 10);
     pub_steering_ = node_->create_publisher<std_msgs::msg::Float32>("steering_angle", 10);
@@ -219,7 +229,7 @@ public:
       u_cmd = std::clamp(setpoint, -p_.v_max, p_.v_max);
       tau_u = interp(std::abs(setpoint), p_.speed_lag_v, p_.speed_lag);
     }
-    step(d_cmd, u_cmd, tau_u, h);
+    step(node_->get_parameter("mu_scale").as_double(), d_cmd, u_cmd, tau_u, h);
     wheel_ema_ += h / WHEEL_EMA_TAU * (x_[U] - wheel_ema_);
     wheel_angle_ += x_[U] / p_.wheel_radius * h;
 
@@ -234,7 +244,7 @@ public:
   }
 
 private:
-  void step(double d_cmd, double u_cmd, double tau_u, double h)
+  void step(double mu_scale, double d_cmd, double u_cmd, double tau_u, double h)
   {
     State & x = x_;
     if (std::max(x[VX], x[U]) < V_KIN) {
@@ -249,10 +259,10 @@ private:
       x[Y] += h * (x[VX] * std::sin(x[PSI]) + x[VY] * std::cos(x[PSI]));
       return;
     }
-    const State k1 = deriv(p_, x, d_cmd, u_cmd, tau_u);
-    const State k2 = deriv(p_, add(x, k1, h / 2), d_cmd, u_cmd, tau_u);
-    const State k3 = deriv(p_, add(x, k2, h / 2), d_cmd, u_cmd, tau_u);
-    const State k4 = deriv(p_, add(x, k3, h), d_cmd, u_cmd, tau_u);
+    const State k1 = deriv(p_, mu_scale, x, d_cmd, u_cmd, tau_u);
+    const State k2 = deriv(p_, mu_scale, add(x, k1, h / 2), d_cmd, u_cmd, tau_u);
+    const State k3 = deriv(p_, mu_scale, add(x, k2, h / 2), d_cmd, u_cmd, tau_u);
+    const State k4 = deriv(p_, mu_scale, add(x, k3, h), d_cmd, u_cmd, tau_u);
     for (int i = 0; i < N; i++) {
       x[i] += h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
     }
