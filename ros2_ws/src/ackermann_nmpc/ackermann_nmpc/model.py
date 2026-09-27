@@ -1,8 +1,9 @@
 import casadi as ca
 from acados_template import AcadosModel
 
-# The car of Phase 5 (scripts/vehicle_model.py) in CasADi, in path coordinates at the CG.
-# p: the ros__parameters of vehicle_params.yaml.
+# The car of Phase 5 (scripts/vehicle_model.py) in CasADi, in path coordinates of the rear
+# axle (base_footprint): when the tires grip it moves along the heading, so e_psi = 0 on the
+# line. The body dynamics stay at the CG. p: the ros__parameters of vehicle_params.yaml.
 G = 9.81
 TAU_U = 0.03    # s, wheel speed loop, middle of the measured 15-45 ms
 
@@ -33,8 +34,9 @@ def forces(p, vx, vy, r, d, u, mu_scale):
 
 
 def path_model(p):
-    # states: progress s, lateral offset n (+ left) and heading error e_psi to the path, the
-    # Phase 5 states vx, vy, r, steering angle d, wheel speed u, and the two /drive commands
+    # states: progress s, lateral offset n (+ left) and heading error e_psi of the rear axle to
+    # the path, the Phase 5 states at the CG vx, vy, r, steering angle d, wheel speed u, the two
+    # /drive commands
     # (wheel angle, wheel speed). Inputs: the rates of the commands. Parameters: mu_scale and
     # the path curvature kappa at the stage
     s, n, e_psi, vx, vy, r, d, u, d_cmd, u_cmd = [ca.SX.sym(name) for name in [
@@ -43,7 +45,8 @@ def path_model(p):
     mu_scale, kappa = ca.SX.sym('mu_scale'), ca.SX.sym('kappa')
 
     fx, fy, mz = forces(p, vx, vy, r, d, u, mu_scale)
-    s_dot = (vx * ca.cos(e_psi) - vy * ca.sin(e_psi)) / (1 - n * kappa)
+    vy_rear = vy - p['lr'] * r
+    s_dot = (vx * ca.cos(e_psi) - vy_rear * ca.sin(e_psi)) / (1 - n * kappa)
 
     model = AcadosModel()
     model.name = 'car'
@@ -52,7 +55,7 @@ def path_model(p):
     model.p = ca.vertcat(mu_scale, kappa)
     model.f_expl_expr = ca.vertcat(
         s_dot,
-        vx * ca.sin(e_psi) + vy * ca.cos(e_psi),
+        vx * ca.sin(e_psi) + vy_rear * ca.cos(e_psi),
         r - kappa * s_dot,
         fx / p['mass'] + vy * r,
         fy / p['mass'] - vx * r,
