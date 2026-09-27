@@ -74,6 +74,15 @@ class PurePursuitNode(Node):
         if now - self.stop_time > Duration(seconds=0.5):
             self.done = True
 
+    def link_ages(self):
+        # which transform is behind: map -> odom (AMCL) or odom -> base_footprint (EKF)
+        now = self.get_clock().now()
+        ages = []
+        for parent, child in [('map', 'odom'), ('odom', 'base_footprint')]:
+            tf = self.tf_buffer.lookup_transform(parent, child, Time())
+            ages.append(f'{parent}->{child} {(now - Time.from_msg(tf.header.stamp)).nanoseconds * 1e-9:+.2f} s')
+        return ', '.join(ages)
+
     def tick(self):
         if self.stopped is not None:
             self.stop(self.stopped)
@@ -93,7 +102,7 @@ class PurePursuitNode(Node):
                 # not started yet: wait for a fresh pose (localization lags while this starts)
                 self.pub_drive.publish(AckermannDrive())
             else:
-                self.stop(f'pose {age.nanoseconds * 1e-9:.2f} s old')
+                self.stop(f'pose {age.nanoseconds * 1e-9:.2f} s old ({self.link_ages()})')
             return
 
         x, y = tf.transform.translation.x, tf.transform.translation.y
