@@ -40,6 +40,8 @@ class PurePursuitNode(Node):
         self.lap = 0
         self.halfway = False
         self.stopped = None
+        self.stop_time = None
+        self.done = False
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -61,10 +63,16 @@ class PurePursuitNode(Node):
         self.pub_path.publish(path)
 
     def stop(self, reason):
+        # zero commands for half a second, then the node exits: a stopped controller
+        # must not keep publishing next to another one
+        now = self.get_clock().now()
         if self.stopped is None:
             self.stopped = reason
+            self.stop_time = now
             self.get_logger().info(f'stopped: {reason}')
         self.pub_drive.publish(AckermannDrive())
+        if now - self.stop_time > Duration(seconds=0.5):
+            self.done = True
 
     def tick(self):
         if self.stopped is not None:
@@ -120,7 +128,8 @@ def main():
     rclpy.init()
     node = PurePursuitNode()
     try:
-        rclpy.spin(node)
+        while rclpy.ok() and not node.done:
+            rclpy.spin_once(node)
     except KeyboardInterrupt:
         pass
     node.destroy_node()
