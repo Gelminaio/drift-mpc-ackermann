@@ -12,7 +12,7 @@ A Gazebo system plugin in place of the ESP32 and the car, same topics as the fir
 `/drive` and `/arm` in, `/joint_states`, `/imu/data_raw` and `/steering_angle` out at 50 Hz,
 stamped with sim time. Kept from the firmware: soft stop at 2 m/s² after 0.5 s without
 `/drive`, arming zeroes the setpoint, duty 0 when disarmed, 45 ms EMA on the wheel speed, the IMU
-covariances.
+covariances. `/ground_truth`: the true pose and velocities of base_footprint in the map.
 
 Dynamics: the Phase 5 model (`scripts/vehicle_model.py`), parameters read from
 `vehicle_params.yaml`, RK4 at the 1 ms world step, pose written to the model every step.
@@ -21,16 +21,42 @@ with 78 ms: the BTS7960 brakes the motors, fitted on 3 Pure Pursuit stops. Below
 the tire model is singular, so it switches to the kinematic bicycle. The car has no
 collisions.
 
-## Check
+IMU noise as on tiles in the Pure Pursuit runs: gyro 0.0014 rad/s at rest and 0.063 v moving,
+accelerometer 0.07 m/s² at rest and 3.0 v moving (vibration).
 
-The /drive of the sysid runs replayed open loop (`scripts/sim_replay.py`), yaw rate against
-the real run:
+## Open loop
+
+The /drive of the sysid runs replayed (`scripts/sim_replay.py`), yaw rate against the real run:
 
 | run | yaw rms [rad/s] | NRMSE | Phase 5 fit, measured v_x |
 |---|---|---|---|
-| id_steps | 0.099 | 0.14 | 0.088 |
-| val_drift | 0.47 | 0.17 | 0.79 |
+| id_steps | 0.094 | 0.13 | 0.088 |
+| val_drift | 0.48 | 0.17 | 0.79 |
 
-The plugin matches the Python model to 0.033 rad/s rms, the simulated gyro noise after a 5
-sample mean. In val_drift the sim goes into the donut 1 s early and turns at 4.0 rad/s,
-real 3.3-3.9. Real time factor 1.0 on the desktop.
+The plugin matches the Python model to 0.016 rad/s rms, the simulated gyro noise. In steady
+turns the model gives 6-9% less yaw rate than the car. In val_drift the sim goes into the
+donut 1 s early and turns at 4.0 rad/s, real 3.3-3.9. Real time factor 1.0 on the desktop.
+
+## Laps
+
+The Phase 7 session with the same nodes and parameters, started in the order used on the Pi:
+
+    ros2 launch ackermann_gazebo sim.launch.py
+    ros2 launch ackermann_bringup robot.launch.py use_sim_time:=true use_lidar:=false use_camera:=false
+    ros2 launch ackermann_bringup localization.launch.py use_sim_time:=true
+    ros2 topic pub -w 1 -t 10 -r 10 /arm std_msgs/msg/Bool "{data: true}"
+    ros2 launch ackermann_bringup pure_pursuit.launch.py use_sim_time:=true speed_scale:=0.6
+
+`notebooks/simulation.ipynb`, 3 laps each, lateral error measured against the localization as
+on the real runs, and in the sim against the truth:
+
+| | speed | laps [s] | error rms [cm] | true error rms [cm] | localization rms [cm] |
+|---|---|---|---|---|---|
+| real | 0.6 | 17.1, 17.2 | 1.8 | | |
+| sim | 0.6 | 16.9, 16.7 | 3.6 | 4.1 | 6.2 |
+| real | 1.0 | 10.2, 10.1 | 2.7 | | |
+| sim | 1.0 | 10.1, 10.2 | 4.4 | 4.7 | 5.7 |
+
+Lap times, AMCL (6.8 Hz, same spread) and the stop past the line (9-21 cm, real 10-15) match.
+The sim runs 3-5 cm wide in the corners, where it turns 4-6% less at the same command: the
+open loop deficit above.
