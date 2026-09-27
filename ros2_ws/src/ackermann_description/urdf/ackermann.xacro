@@ -13,6 +13,7 @@
   <xacro:property name="track_width"  value="${vehicle['track']}"/>
   <xacro:property name="wheel_radius" value="${vehicle['wheel_radius']}"/>
   <xacro:property name="wheel_width"  value="0.025"/>
+  <xacro:arg name="sim" default="false"/>   <!-- true: Gazebo body and sensors (ackermann_gazebo) -->
 
   <!-- LIDAR -->
   <xacro:property name="lidar_x"   value="0.09225"/>
@@ -125,5 +126,49 @@
     <child  link="imu_link"/>
     <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 ${imu_yaw}"/>
   </joint>
+
+  <!-- Gazebo only. The car has no collisions: the dynamics plugin of ackermann_gazebo moves it -->
+  <xacro:if value="$(arg sim)">
+    <link name="body_inertia">
+      <inertial>
+        <mass value="${vehicle['mass']}"/>
+        <inertia ixx="0.005" ixy="0" ixz="0" iyy="0.012" iyz="0" izz="${vehicle['iz']}"/>
+      </inertial>
+    </link>
+    <joint name="body_inertia_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="body_inertia"/>
+      <origin xyz="${vehicle['lr']} 0 ${vehicle['h_cg'] - wheel_radius}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- RPLIDAR A1 as measured: 6.8 Hz, 1442 points a turn -->
+    <gazebo reference="lidar_link">
+      <sensor name="lidar" type="gpu_lidar">
+        <topic>scan</topic>
+        <gz_frame_id>lidar_link</gz_frame_id>
+        <update_rate>6.8</update_rate>
+        <always_on>true</always_on>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>1442</samples>
+              <min_angle>-3.14159</min_angle>
+              <max_angle>3.14159</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.15</min>
+            <max>12.0</max>
+            <resolution>0.01</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+    </gazebo>
+  </xacro:if>
 
 </robot>
