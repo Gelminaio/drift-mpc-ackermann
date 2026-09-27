@@ -87,7 +87,7 @@ The system is organized in three computational tiers:
 | Mapping & baseline tracking | `slam_toolbox`, Pure Pursuit / Stanley |
 | Control | Nonlinear MPC via [`acados`](https://docs.acados.org/), dynamic bicycle + Pacejka tire model |
 | Friction estimation | Model-based recursive least-squares / scikit-learn |
-| Simulation | Gazebo Harmonic / NVIDIA Isaac Sim (adjustable friction, domain randomization) |
+| Simulation | Gazebo Harmonic (`ros_gz`), identified dynamics in a C++ system plugin, adjustable friction |
 | Tooling | Docker, PlatformIO, colcon, GitHub Actions |
 
 ---
@@ -97,8 +97,7 @@ The system is organized in three computational tiers:
 ```
 drift-mpc-ackermann/
 ├── firmware/           # ESP32 firmware (PlatformIO)
-├── ros2_ws/src/        # ROS 2 packages (perception, control, bringup)
-├── simulation/         # Gazebo / Isaac Sim worlds and launch files
+├── ros2_ws/src/        # ROS 2 packages (description, odometry, control, bringup, gazebo)
 ├── docker/             # Dockerfile and compose for base station
 ├── docs/               # Technical documentation (MkDocs)
 ├── notebooks/          # System identification, data analysis, plots
@@ -158,7 +157,7 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 5** — Dynamic modeling & system identification (nonlinear tire model)
 - [x] **Phase 6** — State estimation (EKF) & sideslip estimation
 - [x] **Phase 7** — Track, racing line & baseline controller
-- [ ] **Phase 8** — Simulation & digital twin (friction randomization)
+- [x] **Phase 8** — Simulation & digital twin (friction randomization)
 - [ ] **Phase 9** — Dynamic NMPC baseline at the limit of adhesion (acados)
 - [ ] **Phase 10** — Online friction estimation
 - [ ] **Phase 11** — Friction-adaptive MPC / autonomous drift control
@@ -219,6 +218,22 @@ overhead phone video tracking two markers on the car, plus IMU and encoders.
   speed, 10.1 s a lap, 2.7 cm rms from the line, 6-7 cm at worst.
 - [`notebooks/track_following.ipynb`](notebooks/track_following.ipynb), [`docs/mapping.md`](docs/mapping.md),
   [`docs/localization.md`](docs/localization.md), [`docs/track.md`](docs/track.md).
+
+### Phase 8 — Simulation and digital twin
+
+<p align="center">
+  <img src="media/simulation.png" alt="Drift sideslip in Gazebo against the overhead video, and Pure Pursuit paths at lower friction" width="90%"/>
+</p>
+
+- Gazebo Harmonic: the room built from the map, the lidar as the A1, and a C++ system plugin in
+  place of the ESP32 and the car: same ROS topics, Phase 5 dynamics at 1 kHz, measured IMU noise.
+- The Phase 7 stack runs unchanged on sim time: 10.1 s laps as the real car, localization 6 cm
+  rms from the truth, 4.4 cm from the line against 2.7 (the model turns 4-6% less in corners).
+- The drift replayed open loop: the same donut, 6-9 deg more sideslip at the rear axle (the
+  model has no motor torque limit).
+- Floor friction as a parameter: Pure Pursuit tuned on the tiles holds the line down to 35% of
+  their friction and spins at 25%.
+- [`notebooks/simulation.ipynb`](notebooks/simulation.ipynb), [`docs/simulation.md`](docs/simulation.md).
 
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
