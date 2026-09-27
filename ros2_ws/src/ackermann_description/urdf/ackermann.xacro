@@ -141,6 +141,14 @@
       <origin xyz="${vehicle['lr']} 0 ${vehicle['h_cg'] - wheel_radius}" rpy="0 0 0"/>
     </joint>
 
+    <!-- ESP32 and car: /drive and /arm in, wheels, IMU and steering out -->
+    <gazebo>
+      <plugin filename="sim_car" name="ackermann_gazebo::SimCar">
+        <imu_x>${imu_x}</imu_x>
+        <imu_y>${imu_y}</imu_y>
+      </plugin>
+    </gazebo>
+
     <!-- RPLIDAR A1 as measured: 6.8 Hz, 1442 points a turn -->
     <gazebo reference="lidar_link">
       <sensor name="lidar" type="gpu_lidar">
