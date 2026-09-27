@@ -15,7 +15,7 @@ amcl:
     max_particles: 2000
     update_min_d: 0.05             # m
     update_min_a: 0.1              # rad
-    transform_tolerance: 1.0        # nav2 default; the EKF carries the pose between updates, slower on the Pi
+    transform_tolerance: 0.2
     # odometry noise, default 0.2: the EKF drifts ~2% of the distance. On the replayed lap
     # the correction per update drops from 1.6 / 6.3 / 9.9 cm (median / 95% / max) to
     # 1.1 / 3.6 / 5.9 cm (docs/localization.md)
