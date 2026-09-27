@@ -11,13 +11,13 @@ high. Lidar: gpu_lidar as the A1, 6.8 Hz, 1442 points, 1 cm noise.
 A Gazebo system plugin in place of the ESP32 and the car, same topics as the firmware:
 `/drive` and `/arm` in, `/joint_states`, `/imu/data_raw` and `/steering_angle` out at 50 Hz,
 stamped with sim time. Kept from the firmware: soft stop at 2 m/s² after 0.5 s without
-`/drive`, arming zeroes the setpoint, duty 0 coasts, 45 ms EMA on the wheel speed, the IMU
+`/drive`, arming zeroes the setpoint, duty 0 when disarmed, 45 ms EMA on the wheel speed, the IMU
 covariances.
 
 Dynamics: the Phase 5 model (`scripts/vehicle_model.py`), parameters read from
 `vehicle_params.yaml`, RK4 at the 1 ms world step, pose written to the model every step.
 Wheel speed follows the setpoint with the measured lags (15-45 ms). At duty 0 it decays
-with 78 ms: the gearmotor stops the wheels, fitted on 3 Pure Pursuit stops. Below 0.1 m/s
+with 78 ms: the BTS7960 brakes the motors, fitted on 3 Pure Pursuit stops. Below 0.1 m/s
 the tire model is singular, so it switches to the kinematic bicycle. The car has no
 collisions.
 

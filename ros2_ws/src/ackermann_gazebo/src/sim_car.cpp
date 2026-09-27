@@ -48,7 +48,7 @@ using State = std::array<double, N>;
 struct Params
 {
   double mass, iz, lf, lr, track, wheel_radius, nf, nr;
-  double mu_f, b_f, mu_r, b_r, c, steer_lag, coast_lag, v_max;
+  double mu_f, b_f, mu_r, b_r, c, steer_lag, brake_lag, v_max;
   std::vector<double> steer_cmd, steer_angle, speed_lag_v, speed_lag;
 };
 
@@ -138,7 +138,7 @@ public:
     p_.b_r = y["tire_b_r"].as<double>();
     p_.c = y["tire_c"].as<double>();
     p_.steer_lag = y["steer_lag"].as<double>();
-    p_.coast_lag = y["coast_lag"].as<double>();
+    p_.brake_lag = y["brake_lag"].as<double>();
     p_.v_max = y["v_max"].as<double>();
     p_.steer_cmd = y["steer_cmd"].as<std::vector<double>>();
     p_.steer_angle = y["steer_angle"].as<std::vector<double>>();
@@ -205,7 +205,7 @@ public:
     }
 
     const double d_cmd = interp(servo, p_.steer_cmd, p_.steer_angle);
-    double u_cmd = 0.0, tau_u = p_.coast_lag;
+    double u_cmd = 0.0, tau_u = p_.brake_lag;
     if (armed && std::abs(setpoint) >= PID_DEADBAND) {
       u_cmd = std::clamp(setpoint, -p_.v_max, p_.v_max);
       tau_u = interp(std::abs(setpoint), p_.speed_lag_v, p_.speed_lag);
