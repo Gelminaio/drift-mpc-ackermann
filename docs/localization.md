@@ -36,7 +36,9 @@ in tmux): with AMCL and RViz on the desktop, the Pi streamed ~250 kB/s over wifi
 went to ~1 s and robot_localization missed its 50 Hz. With nothing pulled to the desktop,
 36 kB/s and 3 ms.
 
-Before a session, `fastdds shm clean`. Nodes killed without a clean shutdown leave Fast DDS
-shared memory ports behind, and a publish then blocked up to 0.32 s every ~30-60 s (one
-0.35 s stall stopped the controller on "pose 0.39 s old"). Cleaned: 0 blocks in 3000
-publishes, max 1.8 ms. Stop launches with Ctrl-C in their tmux window, not by killing it.
+Every node on the Pi runs with Fast DDS over UDP only (`setup/pi/ros_env.sh`). Nodes killed
+without a clean shutdown leave their shared memory ports behind, and a publisher still
+matched to one blocked up to 0.32 s every ~30-60 s: the controller stalled 0.35 s and stopped
+on "pose 0.39 s old", and an /arm from the Pi never reached the ESP32. `fastdds shm clean`
+fixed it only until the next node died badly. Over UDP: 0 blocks in 3000 publishes, max 1.0 ms,
+and the first 3 laps with the controller on the Pi.
