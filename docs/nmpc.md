@@ -5,7 +5,9 @@ Package `ackermann_nmpc`. Dynamic NMPC on the Phase 5 model with
 
 ## Setup
 
-acados v0.6.0 from source, in the home directory (no root):
+acados v0.6.0 from source, in the home directory (no root). On the Pi: cmake with
+`-DBLASFEO_TARGET=ARMV8A_ARM_CORTEX_A57 -DHPIPM_TARGET=GENERIC`, the t_renderer `linux-arm64`, and
+scipy from apt (`python3-scipy`): pip's would bring numpy 2 over the numpy of ROS.
 
     git clone https://github.com/acados/acados.git ~/acados
     cd ~/acados && git checkout v0.6.0 && git submodule update --recursive --init
@@ -43,14 +45,15 @@ through the acados integrator within 1e-7 m, on a straight path and on a circle.
 
 ## OCP
 
-`ackermann_nmpc/ocp.py`: 50 stages of 20 ms, 1 s ahead.
+`ackermann_nmpc/ocp.py`: 1 s ahead in 25 stages, 10 of 20 ms then 15 of 53 ms, solved every 20 ms.
+`ocp` follows a line, `drift_ocp` holds a drift on a circle (`notebooks/drift.ipynb`).
 
 | cost | n 5 cm, e_psi 0.1 rad, speed against the profile 0.3 m/s, command rates 0.5 |
 |---|---|
 | hard | d_cmd within the steering map, u_cmd 0-1.2 m/s, rates 4.36 rad/s and 5 m/s² |
 | soft | \|n\| < 0.3 m, vx > 0.3 m/s (the tire model is singular at rest) |
 | integrator | implicit Gauss-Legendre, 1 step a stage: the front tire is stiff at low speed (1.4 ms at 0.3 m/s), explicit RK4 needs < 3.8 ms steps there |
-| solver | 1 Gauss-Newton SQP iteration per control step with a merit line search, HPIPM, warm start shifted by a stage |
+| solver | 1 Gauss-Newton SQP iteration per control step with a merit line search, HPIPM, warm start the previous solution |
 
 No bound on the slip: the tires may saturate. Tracking the CG with e_psi = 0 instead made the
 NMPC lock the rear wheels to rotate the car (the CG has 5-7 deg of sideslip in a corner).
@@ -63,17 +66,17 @@ line, rms (max), cm:
 
 | mu_scale | f | Pure Pursuit | NMPC |
 |---|---|---|---|
-| 1 (tiles) | Phase 7 profile | 3.2 (6.8) | 1.4 (2.7) |
-| 0.35 | 0.6 / 1.0 / 1.2 | 2.2 / 5.0 / 5.8 (15) | 1.2 / 1.0 / 1.3 (3.5) |
-| 0.25 | 0.6 / 1.0 / 1.2 | 1.7 / 5.4 / spins | 1.1 / 0.8 / 1.1 (2.6) |
+| 1 (tiles) | Phase 7 profile | 3.2 (6.8) | 1.6 (3.1) |
+| 0.35 | 0.6 / 1.0 / 1.2 | 2.2 / 5.0 / 5.8 (15) | 1.3 / 1.3 / 1.7 (3.5) |
+| 0.25 | 0.6 / 1.0 / 1.2 | 1.7 / 5.4 / spins | 1.1 / 1.2 / 1.8 (4.5) |
 
-At 120% of the grip the NMPC gives up 7% of the lap time and lets the rear slip 12 deg. With
-the plain real time iteration (full step, no line search) at f 1.0: steering chatter on 63% of
-the steps, 28-38 deg of rear slip, 5-7 cm rms. Solve time 1.0-1.1 ms mean, 2.5 ms max, desktop.
+At 120% of the grip the NMPC gives up 11% of the lap time and lets the rear slip 14-17 deg. With
+the plain real time iteration (full step, no line search) at f 1.0: steering chatter on 25-38% of
+the steps, 7-9 cm at worst against 3. Solve time 0.5 ms mean, 1.3 ms max, desktop.
 
 ## Node
 
-`src/nmpc_node.cpp`, 50 Hz, publishes /drive and `nmpc/solve_time`. CMake runs
+`src/nmpc_node.cpp`, one solve per first stage (20 ms), publishes /drive and `nmpc/solve_time`. CMake runs
 `scripts/generate.py` at configure time: acados generates the solver in C from `ocp.py` with the
 numbers of `vehicle_params.yaml` built in, so a change there rebuilds it. RPATH to the acados
 libraries, no LD_LIBRARY_PATH at run time; ACADOS_SOURCE_DIR is needed to build.
@@ -91,9 +94,24 @@ friction. Against /ground_truth, rms (max), cm:
 
 | mu_scale | profile / grip | Pure Pursuit | NMPC | localization, NMPC |
 |---|---|---|---|---|
-| 1.00 | ~40% | 4.7 (11) | 5.2 (12) | 5.6 |
-| 0.35 | ~105% | 7.6 (28) | 4.4 (11) | 7.2 |
-| 0.25 | ~150% | spins, lap 1 | 5.6 (14), 8% slower | 13 |
+| 1.00 | ~40% | 4.7 (11) | 5.6 (12) | 6.0 |
+| 0.35 | ~105% | 7.6 (28) | 3.3 (8) | 6.4 |
+| 0.25 | ~150% | spins, lap 1 | 6.7 (18), 10% slower | 18 |
+| tight line, 1.00 | ~100% | 8.0 (21) | 4.8 (12), 15% slower | 4.8 |
 
-On the tiles both follow a pose 5.6 cm off the truth: localization, not the controller, sets the
-error. Solve time 1.2-1.3 ms mean, 3.3 max after the first call (10 iterations, 15-21 ms).
+On the tiles both follow a pose ~6 cm off the truth: localization, not the controller, sets the
+error. Solve time 0.6-0.7 ms mean, 2.2 max after the first call (10 iterations).
+
+## On the Pi
+
+Raspberry Pi 4, the closed loop of `nmpc.ipynb` timed by acados, with the lidar, odometry, EKF
+and AMCL running:
+
+| horizon | solve mean / 99% / max [ms] | Gazebo, mu_scale 0.25, cm rms, 3 runs |
+|---|---|---|
+| 50 x 20 ms, 50 Hz | 10.5 / 15.5 / 16.7 (idle) | 6.2, 8.1, 6.2 |
+| 25 x 40 ms, 25 Hz | 5.5 / 8.1 / 9.1 | 14.6, 8.9, 8.7 |
+| 10 x 20 + 15 x 53 ms, 50 Hz | 5.6 / 8.5 / 9.6 | 8.3, 7.2, 7.1 |
+
+The NMPC runs on the Pi with the last one: 10 ms at worst in a 20 ms loop. The drift problem
+takes the same, 5.5 / 6.3 / 6.4 ms.
