@@ -158,7 +158,7 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 6** — State estimation (EKF) & sideslip estimation
 - [x] **Phase 7** — Track, racing line & baseline controller
 - [x] **Phase 8** — Simulation & digital twin (friction randomization)
-- [ ] **Phase 9** — Dynamic NMPC at the limit of adhesion (acados)
+- [x] **Phase 9** — Dynamic NMPC at the limit of adhesion (acados)
 - [ ] **Phase 10** — Autonomous drift around a target, friction estimated from the drift
 - [ ] **Phase 11** — Drift parking planned with the estimated friction, on two surfaces
 - [ ] **Phase 12** — Autonomous gymkhana: one-take run, onboard HUD video, technical report
@@ -235,12 +235,27 @@ overhead phone video tracking two markers on the car, plus IMU and encoders.
   their friction and spins at 25%.
 - [`notebooks/simulation.ipynb`](notebooks/simulation.ipynb), [`docs/simulation.md`](docs/simulation.md).
 
+### Phase 9 — Dynamic NMPC at the limit
+
+<p align="center">
+  <img src="media/nmpc.png" alt="NMPC against Pure Pursuit: in Gazebo at 25% of the grip, and on the car on the tight line" width="90%"/>
+</p>
+
+- acados on the Phase 5 model in CasADi, path coordinates of the rear axle, one Gauss-Newton SQP
+  iteration with a line search every 20 ms. The C++ node solves in 8 ms on the Pi.
+- Gazebo, friction as a parameter: at 35% of the grip of the tiles 3.3 cm rms from the line
+  against 7.6 for Pure Pursuit; at 25% Pure Pursuit spins in the first lap, the NMPC drives three
+  laps 6.7 cm rms from the line, 10% slower.
+- On the car, tight line (0.4 m corners) at full speed: 2.7 cm rms from the line (7.4 at worst)
+  against 7.1 (19.4), 21% slower. On the Phase 7 line the two are even, 3.5 against 3.4 cm: there
+  the localization sets the error.
+- [`notebooks/nmpc.ipynb`](notebooks/nmpc.ipynb), [`docs/nmpc.md`](docs/nmpc.md).
+
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
 Planned deliverables include:
 - An autonomous gymkhana in one take: through a cone gate at the limit, a drift around a cone, a sideways slide into a parking gap. Overhead and onboard view, the NMPC plan drawn on the onboard camera
 - The grip of the floor estimated during the drift and used to plan the slide: the same run on two surfaces, against the friction held fixed
-- Tracking at the limit: dynamic NMPC against Pure Pursuit on tight corners, in Gazebo and on the car
 
 ---
 
