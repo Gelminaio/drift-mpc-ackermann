@@ -11,6 +11,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
 #include <tf2/exceptions.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -89,6 +90,7 @@ public:
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     pub_drive_ = create_publisher<ackermann_msgs::msg::AckermannDrive>("/drive", 10);
     pub_solve_time_ = create_publisher<std_msgs::msg::Float32>("nmpc/solve_time", 10);
+    pub_state_ = create_publisher<std_msgs::msg::Float64MultiArray>("drift/state", 10);
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odometry/filtered", 10, [this](const nav_msgs::msg::Odometry & m) {
         vx_ekf_ = m.twist.twist.linear.x;
@@ -254,6 +256,9 @@ private:
         ocp_nlp_out_set(config_, dims_, out_, in_, j, "x", x0);
       }
     }
+    std_msgs::msg::Float64MultiArray state;
+    state.data.assign(x0, x0 + DRIFT_NX);
+    pub_state_->publish(state);
     ocp_nlp_constraints_model_set(config_, dims_, in_, out_, 0, "lbx", x0);
     ocp_nlp_constraints_model_set(config_, dims_, in_, out_, 0, "ubx", x0);
     int status = 0;
@@ -317,6 +322,7 @@ private:
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDrive>::SharedPtr pub_drive_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr pub_solve_time_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_state_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joints_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;

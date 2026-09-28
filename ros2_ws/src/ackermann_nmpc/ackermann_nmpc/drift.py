@@ -20,3 +20,16 @@ def circle(p, vx, vy, r):
     heading = np.pi / 2 - beta      # CG at (V / r, 0) going +y
     rear = np.array([V / r - p['lr'] * np.cos(heading), -p['lr'] * np.sin(heading)])
     return np.hypot(*rear), np.angle(np.exp(1j * (heading - np.arctan2(rear[1], rear[0]) - np.pi / 2)))
+
+
+def friction(p, d, u, radius, guess):
+    # the floor friction (mu_scale) of a steady drift: steering d and wheel speed u holding the
+    # rear axle on a circle of this radius. Unknowns rear slip, yaw rate, mu_scale; far from the
+    # measured slip and yaw rate fsolve can end on the trivial root r = 0, mu_scale = 0
+    z = ca.SX.sym('z', 3)
+    vx = z[1] * radius * ca.cos(z[0])
+    vy = z[1] * radius * ca.sin(z[0]) + p['lr'] * z[1]
+    fx, fy, mz = forces(p, vx, vy, z[1], d, u, z[2])
+    f = ca.Function('f', [z], [ca.vertcat(fx / p['mass'] + vy * z[1], fy / p['mass'] - vx * z[1], mz / p['iz'])])
+    z, _, ok, _ = fsolve(lambda z: np.array(f(z)).ravel(), guess, full_output=True)
+    return z, ok == 1

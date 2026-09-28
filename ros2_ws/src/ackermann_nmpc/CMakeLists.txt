@@ -61,5 +61,6 @@ foreach(name nmpc drift)
 endforeach()
 
 ament_python_install_package(${PROJECT_NAME})
+install(PROGRAMS scripts/friction_node.py DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

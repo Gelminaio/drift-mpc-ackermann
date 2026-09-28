@@ -44,6 +44,8 @@ FIELDS = {
     '/drive': lambda m: {'cmd_steer': m.steering_angle, 'cmd_speed': m.speed},
     '/cmd_vel': lambda m: {'cmd_vx': m.linear.x, 'cmd_wz': m.angular.z},
     '/nmpc/solve_time': lambda m: {'ms': m.data},
+    '/drift/state': lambda m: dict(zip(['s', 'n', 'e_psi', 'vx', 'vy', 'r', 'd', 'u', 'd_cmd', 'u_cmd'], m.data)),
+    '/drift/mu': lambda m: {'mu': m.data},
 }
 
 
