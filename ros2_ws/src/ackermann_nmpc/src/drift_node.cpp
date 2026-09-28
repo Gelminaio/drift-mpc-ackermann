@@ -22,17 +22,23 @@
 // The drift of ocp.drift_ocp around a cone, from rest. The cone is the reference: the node keeps
 // where it is from the rear axle, from the scans, carried between them by the motion of the car;
 // the map only tells where to look for it at the start. Straight ahead up to launch_speed, pure
-// pursuit on the line the car points along at the start with the cone a radius to its left, the
-// drift NMPC from just before the cone is abeam for hold seconds, then zero commands. Seen from
-// the rear axle at distance rho and angle atan2(x, y), the cone gives the offset to the circle
-// n = radius - rho and the heading error. vx, vy and the steering angle come from the previous
-// solve (the wheels no longer tell the ground speed), the yaw rate from the gyro (EKF).
+// pursuit on the line the car points along at the start with the cone a radius to its left. Just
+// before the cone is abeam, full lock and full throttle until the car spins (the donut of Phase 5),
+// then the drift NMPC for hold seconds, then zero commands. Seen from the rear axle at distance rho
+// and angle atan2(x, y), the cone gives the offset to the circle n = radius - rho and the heading
+// error. vx, vy and the steering angle come from the previous solve (the wheels no longer tell the
+// ground speed), the yaw rate from the gyro (EKF).
 
 constexpr double CONE_WINDOW = 0.15;   // m around where the cone should be
 constexpr double CONE_RADIUS = 0.042;  // m, the cardboard tube used as the cone
 constexpr double CONE_TIMEOUT = 0.5;   // s without the cone: stop
 constexpr double LOOKAHEAD = 0.4;      // m, pure pursuit in the run-up
 constexpr double HANDOVER = 0.10;      // m before the cone is abeam: the steering lag, 0.17 s
+// the entry: on the car only a step to full torque at full lock breaks the rear loose (the model
+// lets it go with less), a speed above what the motor reaches saturates the speed loop
+constexpr double KICK_SPEED = 1.5;     // m/s
+constexpr double KICK_YAW_RATE = 3.0;  // rad/s: the donut, the car turns at most 2.8 on its tires
+constexpr double KICK_TIMEOUT = 1.5;   // s
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -63,6 +69,7 @@ public:
     wheel_radius_ = declare_parameter<double>("wheel_radius");
     wheelbase_ = declare_parameter<double>("wheelbase");
     lr_ = declare_parameter<double>("lr");
+    v_max_ = declare_parameter<double>("v_max");
     steer_cmd_ = declare_parameter<std::vector<double>>("steer_cmd");
     steer_angle_ = declare_parameter<std::vector<double>>("steer_angle");
     // the cone, in the map, and the run
@@ -80,6 +87,10 @@ public:
     const double r = declare_parameter<double>("drift_r");
     const double d = declare_parameter<double>("drift_steering");
     const double u = declare_parameter<double>("drift_wheel_speed");
+    // the donut at full lock and that wheel speed: where the NMPC starts after the entry
+    donut_vx_ = declare_parameter<double>("donut_vx");
+    donut_vy_ = declare_parameter<double>("donut_vy");
+    full_lock_ = steer_angle_.back();
 
     capsule_ = drift_acados_create_capsule();
     if (drift_acados_create(capsule_) != 0) {
@@ -266,16 +277,29 @@ private:
       // far the cone is from where it should be (a radius to the left) and the yaw since
       const double offset = radius_ - (std::sin(psi_) * cx_ + std::cos(psi_) * cy_);
       const double ty = -std::sin(psi_) * LOOKAHEAD - std::cos(psi_) * offset;
-      d_cmd_ = std::atan(2 * wheelbase_ * ty / (LOOKAHEAD * LOOKAHEAD + offset * offset));
-      d_ = d_cmd_;    // it steers little: the lag left out
-      u_cmd_ = std::min(launch_speed_, u_cmd_ + 5.0 * in_->Ts[0]);
-      publish(d_cmd_, u_cmd_);
-      if (cx_ > HANDOVER) {
+      if (!kicking_) {
+        d_cmd_ = std::atan(2 * wheelbase_ * ty / (LOOKAHEAD * LOOKAHEAD + offset * offset));
+        u_cmd_ = std::min(launch_speed_, u_cmd_ + 5.0 * in_->Ts[0]);
+        publish(d_cmd_, u_cmd_);
+        if (cx_ > HANDOVER) {
+          return;
+        }
+        kicking_ = true;
+        kick_start_ = now;
+      }
+      publish(full_lock_, KICK_SPEED);
+      if (r_ < KICK_YAW_RATE) {
+        if ((now - kick_start_).seconds() > KICK_TIMEOUT) {
+          stop("no drift after the entry");
+        }
         return;
       }
       drifting_ = true;
       drift_start_ = now;
-      vx_ = vx_ekf_;
+      vx_ = donut_vx_;
+      vy_ = donut_vy_;
+      d_ = d_cmd_ = full_lock_;
+      u_cmd_ = v_max_;
     }
     const double n = radius_ - std::hypot(cx_, cy_), e = std::atan2(cx_, cy_);
     if ((now - drift_start_).seconds() > hold_) {
@@ -325,7 +349,8 @@ private:
     pub_solve_time_->publish(st);
   }
 
-  double wheel_radius_, wheelbase_, lr_, cone_x_, cone_y_, launch_speed_, hold_, mu_scale_, max_error_, radius_;
+  double wheel_radius_, wheelbase_, lr_, v_max_, cone_x_, cone_y_, launch_speed_, hold_, mu_scale_, max_error_,
+    radius_, donut_vx_, donut_vy_, full_lock_;
   std::vector<double> steer_cmd_, steer_angle_;
 
   drift_solver_capsule * capsule_;
@@ -343,8 +368,8 @@ private:
   double lidar_x_ = NAN;
   rclcpp::Time last_cone_;
   int scans_ = 0;
-  bool launched_ = false, drifting_ = false, solved_ = false;
-  rclcpp::Time drift_start_;
+  bool launched_ = false, kicking_ = false, drifting_ = false, solved_ = false;
+  rclcpp::Time kick_start_, drift_start_;
   std::string stopped_;
   rclcpp::Time stop_time_;
 

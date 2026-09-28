@@ -21,6 +21,7 @@ def drift_node(context):
     mu = float(LaunchConfiguration('mu_scale').perform(context))
     vx, vy, r = drift.equilibrium(p, d, u, mu)
     radius, heading = drift.circle(p, vx, vy, r)
+    donut_vx, donut_vy, _ = drift.equilibrium(p, max(p['steer_angle']), u, mu, guess=(0.46, -0.15, 4.0))
     return [Node(
         package='ackermann_nmpc',
         executable='drift_node',
@@ -35,7 +36,8 @@ def drift_node(context):
             'mu_scale': mu,
             'drift_radius': float(radius), 'drift_heading': float(heading),
             'drift_vx': float(vx), 'drift_vy': float(vy), 'drift_r': float(r),
-            'drift_steering': float(d), 'drift_wheel_speed': u}],
+            'drift_steering': float(d), 'drift_wheel_speed': u,
+            'donut_vx': float(donut_vx), 'donut_vy': float(donut_vy)}],
     ), Node(
         package='ackermann_nmpc',
         executable='friction_node.py',
