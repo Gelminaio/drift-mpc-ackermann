@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- a small traffic cone as the lidar sees it at 12.6 cm: 2 cm of radius, 20 cm tall -->
+<sdf version="1.9">
+  <model name="cone">
+    <static>true</static>
+    <link name="link">
+      <pose>0 0 0.1 0 0 0</pose>
+      <collision name="c"><geometry><cylinder><radius>0.02</radius><length>0.2</length></cylinder></geometry></collision>
+      <visual name="v">
+        <geometry><cylinder><radius>0.02</radius><length>0.2</length></cylinder></geometry>
+        <material><ambient>1 0.4 0 1</ambient><diffuse>1 0.4 0 1</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>
