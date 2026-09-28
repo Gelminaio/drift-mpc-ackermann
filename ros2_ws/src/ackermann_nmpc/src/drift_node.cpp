@@ -60,7 +60,8 @@ public:
     hold_ = declare_parameter("hold", 10.0);                 // s of drift
     mu_scale_ = declare_parameter("mu_scale", 1.0);          // floor friction the NMPC assumes
     max_error_ = declare_parameter("max_error", 0.5);        // m off the circle: stop
-    max_pose_age_ = declare_parameter("max_pose_age", 0.2);  // s since the last pose: stop
+    max_pose_age_ = declare_parameter("max_pose_age", 0.2);  // s since the last odometry: stop
+    max_correction_age_ = declare_parameter("max_correction_age", 0.5);  // s, localization
     // the drift equilibrium and its circle, from drift.py (drift.launch.py)
     radius_ = declare_parameter<double>("drift_radius");
     const double heading = declare_parameter<double>("drift_heading");
@@ -204,9 +205,12 @@ private:
     if (!drifting_) {
       // the run-up on the localization: straight ahead, the wheel speed ramping up, until the
       // cone is abeam
-      geometry_msgs::msg::TransformStamped tf;
+      // the newest localization correction (map -> odom) on the newest odometry: AMCL answers
+      // 0.15-0.2 s after the start of the scan, up to 0.4, the EKF 10 ms after the wheels
+      geometry_msgs::msg::TransformStamped correction, odom;
       try {
-        tf = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero);
+        correction = tf_buffer_->lookupTransform("map", "odom", tf2::TimePointZero);
+        odom = tf_buffer_->lookupTransform("odom", "base_footprint", tf2::TimePointZero);
       } catch (const tf2::TransformException &) {
         if (launched_) {
           stop("no pose");
@@ -215,10 +219,11 @@ private:
         }
         return;
       }
-      const double age = (now - rclcpp::Time(tf.header.stamp)).seconds();
-      if (age > max_pose_age_) {
+      const double age = (now - rclcpp::Time(odom.header.stamp)).seconds();
+      const double correction_age = (now - rclcpp::Time(correction.header.stamp)).seconds();
+      if (age > max_pose_age_ || correction_age > max_correction_age_) {
         if (launched_) {
-          stop("pose " + std::to_string(age) + " s old");
+          stop("odometry " + std::to_string(age) + " s old, localization " + std::to_string(correction_age));
         } else {
           fresh_ = 0;
           pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
@@ -230,8 +235,12 @@ private:
         pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
         return;
       }
-      const double dx = tf.transform.translation.x - cone_x_, dy = tf.transform.translation.y - cone_y_;
-      const double yaw = 2 * std::atan2(tf.transform.rotation.z, tf.transform.rotation.w);
+      const auto & c = correction.transform, & o = odom.transform;
+      const double yaw_c = 2 * std::atan2(c.rotation.z, c.rotation.w);
+      const double x = c.translation.x + std::cos(yaw_c) * o.translation.x - std::sin(yaw_c) * o.translation.y;
+      const double y = c.translation.y + std::sin(yaw_c) * o.translation.x + std::cos(yaw_c) * o.translation.y;
+      const double yaw = yaw_c + 2 * std::atan2(o.rotation.z, o.rotation.w);
+      const double dx = x - cone_x_, dy = y - cone_y_;
       launched_ = true;
       u_cmd_ = std::min(launch_speed_, u_cmd_ + 5.0 * in_->Ts[0]);
       d_cmd_ = 0;
@@ -310,7 +319,8 @@ private:
     double n, e;
   };
 
-  double wheel_radius_, cone_x_, cone_y_, launch_speed_, hold_, mu_scale_, max_error_, max_pose_age_, radius_;
+  double wheel_radius_, cone_x_, cone_y_, launch_speed_, hold_, mu_scale_, max_error_, max_pose_age_,
+    max_correction_age_, radius_;
   std::vector<double> steer_cmd_, steer_angle_;
 
   drift_solver_capsule * capsule_;
