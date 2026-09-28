@@ -11,6 +11,7 @@ def generate_launch_description():
     description = FindPackageShare('ackermann_description')
 
     return LaunchDescription([
+        DeclareLaunchArgument('track', default_value='room_track'),    # maps/<track>.csv
         DeclareLaunchArgument('speed_scale', default_value='1.0'),
         DeclareLaunchArgument('laps', default_value='3'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true in the sim
@@ -23,7 +24,7 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 PathJoinSubstitution([description, 'config', 'vehicle_params.yaml']),
-                {'track_file': PathJoinSubstitution([bringup, 'maps', 'room_track.csv']),
+                {'track_file': PathJoinSubstitution([bringup, 'maps', [LaunchConfiguration('track'), '.csv']]),
                  'speed_scale': ParameterValue(LaunchConfiguration('speed_scale'), value_type=float),
                  'laps': ParameterValue(LaunchConfiguration('laps'), value_type=int)},
             ],
