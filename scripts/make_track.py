@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import yaml
 from PIL import Image
@@ -5,6 +7,7 @@ from scipy import ndimage
 
 # racing line on maps/room: the largest rounded rectangle that keeps CLEAR from every
 # obstacle, counterclockwise, with a speed profile. Run from the repo root.
+# Another line: make_track.py <R> <V_MAX> <A_LAT> <name>, written to maps/room_<name>.csv
 MAP = 'ros2_ws/src/ackermann_bringup/maps/room'
 R = 0.6         # m, corner radius, twice the car's minimum (0.31 m)
 CLEAR = 0.5     # m from any occupied or unknown cell
@@ -12,6 +15,9 @@ DS = 0.05       # m between points
 V_MAX = 1.0     # m/s, baseline speed cap (motors: 1.2)
 A_LAT = 1.0     # m/s2, ~40% of the rear grip (0.276 g): no drift
 A_LONG = 0.8    # m/s2, speeding up and braking
+NAME = 'track'
+if len(sys.argv) > 1:
+    R, V_MAX, A_LAT, NAME = float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
 
 
 def rounded_rect(lx, ly):
@@ -89,7 +95,7 @@ for _ in range(2):
     for i in range(2 * n - 2, -1, -1):
         v[i % n] = min(v[i % n], np.sqrt(v[(i + 1) % n]**2 + 2 * A_LONG * DS))
 
-np.savetxt(MAP + '_track.csv', np.c_[s, P, yaw, kappa, v], delimiter=',', fmt='%.4f',
+np.savetxt(f'{MAP}_{NAME}.csv', np.c_[s, P, yaw, kappa, v], delimiter=',', fmt='%.4f',
            header='s,x,y,yaw,kappa,v', comments='')
 print(f'{lx:.1f} x {ly:.1f} m at {deg:.1f} deg, center ({cx:.2f}, {cy:.2f}); length {s[-1] + DS:.2f} m, '
       f'clearance {clearance(P):.2f} m, speed {v.min():.2f}-{v.max():.2f} m/s, '
