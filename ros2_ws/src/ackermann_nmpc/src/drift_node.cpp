@@ -213,8 +213,14 @@ private:
         if (launched_) {
           stop("pose " + std::to_string(age) + " s old");
         } else {
+          fresh_ = 0;
           pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
         }
+        return;
+      }
+      // the first poses of a new node come irregularly: 1 s of fresh ones before moving
+      if (!launched_ && ++fresh_ < 50) {
+        pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
         return;
       }
       const double dx = tf.transform.translation.x - cone_x_, dy = tf.transform.translation.y - cone_y_;
@@ -313,6 +319,7 @@ private:
   double n_ = 0, e_ = 0, lidar_x_ = NAN;    // offset and heading error to the circle, from the cone
   std::deque<Estimate> history_;            // the last 0.5 s of them
   rclcpp::Time last_cone_;
+  int fresh_ = 0;
   bool launched_ = false, drifting_ = false, solved_ = false;
   rclcpp::Time drift_start_;
   std::string stopped_;
