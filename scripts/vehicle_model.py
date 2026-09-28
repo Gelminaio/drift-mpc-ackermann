@@ -15,21 +15,22 @@ MU_F, B_F, MU_R, B_R, C, TAU = (p['tire_mu_f'], p['tire_b_f'], p['tire_mu_r'], p
                                 p['tire_c'], p['steer_lag'])
 
 
-def rear_wheel(vx, vy, u):
+def rear_wheel(vx, vy, u, k=1.0):
     # one rear wheel at surface speed u: force against its sliding direction
     sx, sy = (vx - u) / max(u, 0.1), vy / max(u, 0.1)
     s = np.hypot(sx, sy) + 1e-9
-    f = MU_R * NR / 2 * np.sin(C * np.arctan(B_R * s))
+    f = k * MU_R * NR / 2 * np.sin(C * np.arctan(B_R / k * s))
     return -f * sx / s, -f * sy / s
 
 
-def forces(x, u):
-    # body forces and yaw moment at the CG; x = vx, vy, r, steering angle; u = rear wheel speed
+def forces(x, u, k=1.0):
+    # body forces and yaw moment at the CG; x = vx, vy, r, steering angle; u = rear wheel speed.
+    # Floor friction k times the tiles, as sim_car: the peak scales, the stiffness does not
     vx, vy, r, d = x
     vx = max(vx, 0.05)
-    fyf = MU_F * NF * np.sin(C * np.arctan(B_F * (d - np.arctan((vy + LF * r) / vx))))
-    fxl, fyl = rear_wheel(vx - T / 2 * r, vy - LR * r, u)
-    fxr, fyr = rear_wheel(vx + T / 2 * r, vy - LR * r, u)
+    fyf = k * MU_F * NF * np.sin(C * np.arctan(B_F / k * (d - np.arctan((vy + LF * r) / vx))))
+    fxl, fyl = rear_wheel(vx - T / 2 * r, vy - LR * r, u, k)
+    fxr, fyr = rear_wheel(vx + T / 2 * r, vy - LR * r, u, k)
     fx = fxl + fxr - fyf * np.sin(d)
     fy = fyf * np.cos(d) + fyl + fyr
     mz = LF * fyf * np.cos(d) - LR * (fyl + fyr) + T / 2 * (fxr - fxl)
