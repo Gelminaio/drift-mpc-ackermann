@@ -83,7 +83,8 @@ public:
     laps_ = declare_parameter("laps", 3);
     mu_scale_ = declare_parameter("mu_scale", 1.0);          // floor friction the NMPC assumes
     max_error_ = declare_parameter("max_error", 0.5);        // m off the line: stop
-    max_pose_age_ = declare_parameter("max_pose_age", 0.2);  // s since the last pose: stop
+    max_pose_age_ = declare_parameter("max_pose_age", 0.2);  // s since the last odometry: stop
+    max_correction_age_ = declare_parameter("max_correction_age", 0.5);  // s, localization
 
     capsule_ = nmpc_acados_create_capsule();
     if (nmpc_acados_create(capsule_) != 0) {
@@ -194,9 +195,12 @@ private:
       stop(stopped_);
       return;
     }
-    geometry_msgs::msg::TransformStamped tf;
+    // the newest localization correction (map -> odom) on the newest odometry: AMCL answers
+    // 0.15-0.2 s after the start of the scan, up to 0.4, the EKF 10 ms after the wheels
+    geometry_msgs::msg::TransformStamped correction, odom;
     try {
-      tf = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero);
+      correction = tf_buffer_->lookupTransform("map", "odom", tf2::TimePointZero);
+      odom = tf_buffer_->lookupTransform("odom", "base_footprint", tf2::TimePointZero);
     } catch (const tf2::TransformException &) {
       if (started_) {
         stop("no pose");
@@ -205,19 +209,24 @@ private:
       }
       return;
     }
-    const double age = (get_clock()->now() - rclcpp::Time(tf.header.stamp)).seconds();
-    if (age > max_pose_age_) {
+    const rclcpp::Time now = get_clock()->now();
+    const double age = (now - rclcpp::Time(odom.header.stamp)).seconds();
+    const double correction_age = (now - rclcpp::Time(correction.header.stamp)).seconds();
+    if (age > max_pose_age_ || correction_age > max_correction_age_) {
       if (started_) {
-        stop("pose " + std::to_string(age) + " s old");
+        stop("odometry " + std::to_string(age) + " s old, localization " + std::to_string(correction_age));
       } else {
         pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
       }
       return;
     }
 
-    const auto & q = tf.transform.rotation;
+    const auto & c = correction.transform, & o = odom.transform;
+    const double yaw_c = 2 * std::atan2(c.rotation.z, c.rotation.w);
+    const double px = c.translation.x + std::cos(yaw_c) * o.translation.x - std::sin(yaw_c) * o.translation.y;
+    const double py = c.translation.y + std::sin(yaw_c) * o.translation.x + std::cos(yaw_c) * o.translation.y;
     double s, n, e_psi;
-    to_path(tf.transform.translation.x, tf.transform.translation.y, 2 * std::atan2(q.z, q.w), s, n, e_psi);
+    to_path(px, py, yaw_c + 2 * std::atan2(o.rotation.z, o.rotation.w), s, n, e_psi);
     s_prev_ = s;
     if (!started_) {
       s_start_ = s;
@@ -273,7 +282,7 @@ private:
     pub_solve_time_->publish(st);
   }
 
-  double wheel_radius_, speed_scale_, mu_scale_, max_error_, max_pose_age_;
+  double wheel_radius_, speed_scale_, mu_scale_, max_error_, max_pose_age_, max_correction_age_;
   int64_t laps_;
   std::vector<double> steer_cmd_, steer_angle_;
   Track track_;
