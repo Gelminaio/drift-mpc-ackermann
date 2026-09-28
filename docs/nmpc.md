@@ -106,6 +106,14 @@ Gazebo, the NMPC told mu_scale 1, rear axle from the cone, target 0.289 m:
 | cone | 0.95 | 0.282 +- 0.002 | 0.266 | -32.2 | 6.8 |
 | cone | 1.05 | 0.300 +- 0.003 | 0.281 | -17.4 | 20.1 |
 
+`scripts/friction_node.py`, launched with it: the floor friction from the drift. On the circle
+the state is known (cone: radius and heading error, which is minus the rear slip; gyro, encoders,
+steering command), and the model has one steady state there per friction: `drift.friction`
+solves the force balances for mu_scale on the mean state from 3 s after the entry, once a second
+on `drift/mu`. Gazebo, the NMPC told 1.00: floors 0.90 / 0.95 / 1.00 / 1.05 / 1.10 give
+0.897 / 0.950 / 1.001 / 1.049 / 1.094. With /scan held back 0.15 s (`scripts/scan_delay.py`, the
+latency of the A1) 1.000 and 0.951, the circle within 1.1 cm.
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the

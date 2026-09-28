@@ -11,6 +11,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
 #include <tf2/exceptions.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -89,6 +90,7 @@ public:
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     pub_drive_ = create_publisher<ackermann_msgs::msg::AckermannDrive>("/drive", 10);
     pub_solve_time_ = create_publisher<std_msgs::msg::Float32>("nmpc/solve_time", 10);
+    pub_state_ = create_publisher<std_msgs::msg::Float64MultiArray>("drift/state", 10);
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odometry/filtered", 10, [this](const nav_msgs::msg::Odometry & m) {
         vx_ekf_ = m.twist.twist.linear.x;
@@ -152,12 +154,19 @@ private:
     if (seen < history_.front().t) {
       return;
     }
-    // the estimate at that time: what it missed is still missing now
-    const auto & h = *std::min_element(history_.begin(), history_.end(), [&](const auto & p, const auto & q) {
+    // the estimate at that time: what it missed is still missing now, and in the estimates kept
+    // since, which the next scan compares against
+    const auto h = std::min_element(history_.begin(), history_.end(), [&](const auto & p, const auto & q) {
       return std::abs((p.t - seen).seconds()) < std::abs((q.t - seen).seconds());
     });
-    n_ += (radius_ - std::hypot(cx, cy)) - h.n;
-    e_ += std::remainder(std::atan2(cx, cy) - h.e, 2 * M_PI);
+    const double dn = (radius_ - std::hypot(cx, cy)) - h->n;
+    const double de = std::remainder(std::atan2(cx, cy) - h->e, 2 * M_PI);
+    for (auto p = h; p != history_.end(); p++) {
+      p->n += dn;
+      p->e += de;
+    }
+    n_ += dn;
+    e_ += de;
     last_cone_ = seen;
   }
 
@@ -211,8 +220,14 @@ private:
         if (launched_) {
           stop("pose " + std::to_string(age) + " s old");
         } else {
+          fresh_ = 0;
           pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
         }
+        return;
+      }
+      // the first poses of a new node come irregularly: 1 s of fresh ones before moving
+      if (!launched_ && ++fresh_ < 50) {
+        pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
         return;
       }
       const double dx = tf.transform.translation.x - cone_x_, dy = tf.transform.translation.y - cone_y_;
@@ -254,6 +269,9 @@ private:
         ocp_nlp_out_set(config_, dims_, out_, in_, j, "x", x0);
       }
     }
+    std_msgs::msg::Float64MultiArray state;
+    state.data.assign(x0, x0 + DRIFT_NX);
+    pub_state_->publish(state);
     ocp_nlp_constraints_model_set(config_, dims_, in_, out_, 0, "lbx", x0);
     ocp_nlp_constraints_model_set(config_, dims_, in_, out_, 0, "ubx", x0);
     int status = 0;
@@ -308,6 +326,7 @@ private:
   double n_ = 0, e_ = 0, lidar_x_ = NAN;    // offset and heading error to the circle, from the cone
   std::deque<Estimate> history_;            // the last 0.5 s of them
   rclcpp::Time last_cone_;
+  int fresh_ = 0;
   bool launched_ = false, drifting_ = false, solved_ = false;
   rclcpp::Time drift_start_;
   std::string stopped_;
@@ -317,6 +336,7 @@ private:
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDrive>::SharedPtr pub_drive_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr pub_solve_time_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_state_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joints_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;

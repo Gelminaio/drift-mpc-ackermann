@@ -12,7 +12,8 @@ from ackermann_nmpc import drift
 
 
 def drift_node(context):
-    # the drift equilibrium for the steering and wheel speed asked, and its circle (drift.py)
+    # the drift equilibrium for the steering and wheel speed asked, and its circle (drift.py);
+    # the friction from the drift
     params_file = os.path.join(get_package_share_directory('ackermann_description'), 'config', 'vehicle_params.yaml')
     p = yaml.safe_load(open(params_file))['/**']['ros__parameters']
     d = np.radians(float(LaunchConfiguration('steering').perform(context)))
@@ -34,6 +35,12 @@ def drift_node(context):
             'drift_radius': float(radius), 'drift_heading': float(heading),
             'drift_vx': float(vx), 'drift_vy': float(vy), 'drift_r': float(r),
             'drift_steering': float(d), 'drift_wheel_speed': u}],
+    ), Node(
+        package='ackermann_nmpc',
+        executable='friction_node.py',
+        name='friction',
+        output='screen',
+        parameters=[{'drift_radius': float(radius), 'mu_scale': mu}],
     )]
 
 
