@@ -14,7 +14,7 @@ A 1:10 scale autonomous vehicle that drives at the limit of tire adhesion — co
 
 ## Abstract
 
-This project investigates aggressive trajectory tracking at the limit of tire adhesion for small-scale autonomous ground vehicles. A Nonlinear MPC controller, formulated on an identified dynamic bicycle model with a nonlinear (Pacejka-type) tire model, regulates trajectory tracking while operating in the saturated-friction regime, enabling controlled oversteer (drift) rather than avoiding it. The road–tire friction coefficient is estimated online from inertial and wheel-odometry measurements, and the MPC model and constraints are adapted accordingly, so the controller maintains stability across surfaces with different and varying grip. The full stack runs distributed over a ROS 2 Jazzy network spanning an ESP32 real-time controller, a Raspberry Pi 4 sensor bridge, and a base-station compute host. Validation is performed both in simulation (sim-to-real pipeline with randomized friction) and on the physical platform across multiple low-friction surfaces.
+This project investigates aggressive trajectory tracking at the limit of tire adhesion for small-scale autonomous ground vehicles. A Nonlinear MPC controller, formulated on an identified dynamic bicycle model with a nonlinear (Pacejka-type) tire model, regulates trajectory tracking while operating in the saturated-friction regime, enabling controlled oversteer (drift) rather than avoiding it. The road–tire friction coefficient is estimated online while the car drifts and enters the MPC model, so the maneuvers that follow are planned for the grip of the floor it is on. The full stack runs distributed over a ROS 2 Jazzy network spanning an ESP32 real-time controller, a Raspberry Pi 4 sensor bridge, and a base-station compute host. The final demonstration is an autonomous gymkhana: a drift around a cone ending in a sideways slide into a parking gap, on two surfaces, with a Gazebo digital twin of the car alongside.
 
 ---
 
@@ -86,7 +86,7 @@ The system is organized in three computational tiers:
 | State estimation | `robot_localization` (EKF) + custom EKF and sideslip estimation (Python/C++) |
 | Mapping & baseline tracking | `slam_toolbox`, Pure Pursuit / Stanley |
 | Control | Nonlinear MPC via [`acados`](https://docs.acados.org/), dynamic bicycle + Pacejka tire model |
-| Friction estimation | Model-based recursive least-squares / scikit-learn |
+| Friction estimation | Model-based, from the steady drift |
 | Simulation | Gazebo Harmonic (`ros_gz`), identified dynamics in a C++ system plugin, adjustable friction |
 | Tooling | Docker, PlatformIO, colcon, GitHub Actions |
 
@@ -158,10 +158,10 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 6** — State estimation (EKF) & sideslip estimation
 - [x] **Phase 7** — Track, racing line & baseline controller
 - [x] **Phase 8** — Simulation & digital twin (friction randomization)
-- [ ] **Phase 9** — Dynamic NMPC baseline at the limit of adhesion (acados)
-- [ ] **Phase 10** — Online friction estimation
-- [ ] **Phase 11** — Friction-adaptive MPC / autonomous drift control
-- [ ] **Phase 12** — Validation, benchmarking, technical report
+- [x] **Phase 9** — Dynamic NMPC at the limit of adhesion (acados)
+- [ ] **Phase 10** — Autonomous drift around a target, friction estimated from the drift
+- [ ] **Phase 11** — Drift parking planned with the estimated friction, on two surfaces
+- [ ] **Phase 12** — Autonomous gymkhana: one-take run, onboard HUD video, technical report
 
 Track progress via [GitHub Milestones](../../milestones).
 
@@ -235,13 +235,27 @@ overhead phone video tracking two markers on the car, plus IMU and encoders.
   their friction and spins at 25%.
 - [`notebooks/simulation.ipynb`](notebooks/simulation.ipynb), [`docs/simulation.md`](docs/simulation.md).
 
+### Phase 9 — Dynamic NMPC at the limit
+
+<p align="center">
+  <img src="media/nmpc.png" alt="NMPC against Pure Pursuit: in Gazebo at 25% of the grip, and on the car on the tight line" width="90%"/>
+</p>
+
+- acados on the Phase 5 model in CasADi, path coordinates of the rear axle, one Gauss-Newton SQP
+  iteration with a line search every 20 ms. The C++ node solves in 8 ms on the Pi.
+- Gazebo, friction as a parameter: at 35% of the grip of the tiles 3.3 cm rms from the line
+  against 7.6 for Pure Pursuit; at 25% Pure Pursuit spins in the first lap, the NMPC drives three
+  laps 6.7 cm rms from the line, 10% slower.
+- On the car, tight line (0.4 m corners) at full speed: 2.7 cm rms from the line (7.4 at worst)
+  against 7.1 (19.4), 21% slower. On the Phase 7 line the two are even, 3.5 against 3.4 cm: there
+  the localization sets the error.
+- [`notebooks/nmpc.ipynb`](notebooks/nmpc.ipynb), [`docs/nmpc.md`](docs/nmpc.md).
+
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
 Planned deliverables include:
-- Trajectory tracking on low-friction surfaces: dynamic NMPC vs. Pure Pursuit / Stanley / kinematic MPC (which lose control at the limit)
-- Online friction estimate vs. ground-truth across surfaces with different grip
-- Friction-adaptive vs. fixed MPC at a surface-grip transition (the key experiment)
-- Sim-to-real transfer gap analysis under randomized friction
+- An autonomous gymkhana in one take: through a cone gate at the limit, a drift around a cone, a sideways slide into a parking gap. Overhead and onboard view, the NMPC plan drawn on the onboard camera
+- The grip of the floor estimated during the drift and used to plan the slide: the same run on two surfaces, against the friction held fixed
 
 ---
 

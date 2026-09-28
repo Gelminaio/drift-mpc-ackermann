@@ -55,9 +55,35 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           rosdep update
           rosdep install --from-paths src --ignore-src -r -y
+
+      # acados for ackermann_nmpc, as in docs/nmpc.md
+      - name: Cache acados
+        id: acados-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/acados
+          key: acados-v0.6.0-${{ runner.os }}
+
+      - name: Build acados
+        if: steps.acados-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch v0.6.0 --depth 1 --recurse-submodules --shallow-submodules https://github.com/acados/acados.git /opt/acados
+          cmake -S /opt/acados -B /opt/acados/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /opt/acados/build --target install -j4
+          mkdir -p /opt/acados/bin
+          curl -L -o /opt/acados/bin/t_renderer https://github.com/acados/tera_renderer/releases/download/v0.2.0/t_renderer-v0.2.0-linux-amd64
+          chmod +x /opt/acados/bin/t_renderer
+
+      - name: Install the acados python interface
+        run: |
+          apt-get install -y python3-pip
+          pip install --break-system-packages -e /opt/acados/interfaces/acados_template casadi==3.7.2
+
       - name: Build workspace
         shell: bash
         working-directory: ros2_ws
+        env:
+          ACADOS_SOURCE_DIR: /opt/acados
         run: |
           source /opt/ros/jazzy/setup.bash
           colcon build --event-handlers console_direct+

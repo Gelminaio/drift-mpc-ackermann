@@ -30,7 +30,7 @@ target_link_libraries(sim_car
 
 install(TARGETS sim_car LIBRARY DESTINATION lib)
 install(
-  DIRECTORY worlds launch config
+  DIRECTORY worlds launch config models
   DESTINATION share/${PROJECT_NAME}
 )
 

@@ -14,19 +14,21 @@ def generate_launch_description():
         DeclareLaunchArgument('track', default_value='room_track'),    # maps/<track>.csv
         DeclareLaunchArgument('speed_scale', default_value='1.0'),
         DeclareLaunchArgument('laps', default_value='3'),
+        DeclareLaunchArgument('mu_scale', default_value='1.0'),        # floor friction the NMPC assumes
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
 
         Node(
-            package='ackermann_control',
-            executable='pure_pursuit_node',
-            name='pure_pursuit',
+            package='ackermann_nmpc',
+            executable='nmpc_node',
+            name='nmpc',
             output='screen',
             parameters=[
                 PathJoinSubstitution([description, 'config', 'vehicle_params.yaml']),
                 {'track_file': PathJoinSubstitution([bringup, 'maps', [LaunchConfiguration('track'), '.csv']]),
                  'speed_scale': ParameterValue(LaunchConfiguration('speed_scale'), value_type=float),
-                 'laps': ParameterValue(LaunchConfiguration('laps'), value_type=int)},
+                 'laps': ParameterValue(LaunchConfiguration('laps'), value_type=int),
+                 'mu_scale': ParameterValue(LaunchConfiguration('mu_scale'), value_type=float)},
             ],
         ),
     ])
