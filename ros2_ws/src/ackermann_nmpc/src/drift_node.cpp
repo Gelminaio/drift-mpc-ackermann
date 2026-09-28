@@ -27,7 +27,7 @@
 // previous solve (the wheels no longer tell the ground speed), the yaw rate from the gyro.
 
 constexpr double CONE_WINDOW = 0.15;   // m around where the cone should be
-constexpr double CONE_RADIUS = 0.02;   // m at the height of the lidar
+constexpr double CONE_RADIUS = 0.042;  // m, the cardboard tube used as the cone
 constexpr double CONE_TIMEOUT = 0.5;   // s without the cone: stop
 
 // as np.interp: linear, held at the ends
