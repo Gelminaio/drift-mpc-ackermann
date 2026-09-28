@@ -111,7 +111,8 @@ the state is known (cone: radius and heading error, which is minus the rear slip
 steering command), and the model has one steady state there per friction: `drift.friction`
 solves the force balances for mu_scale on the mean state from 3 s after the entry, once a second
 on `drift/mu`. Gazebo, the NMPC told 1.00: floors 0.90 / 0.95 / 1.00 / 1.05 / 1.10 give
-0.897 / 0.948 / 1.001 / 1.047 / 1.093.
+0.897 / 0.950 / 1.001 / 1.049 / 1.094. With /scan held back 0.15 s (`scripts/scan_delay.py`, the
+latency of the A1) 1.000 and 0.951, the circle within 1.1 cm.
 
 ## Gazebo
 
