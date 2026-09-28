@@ -43,6 +43,7 @@ FIELDS = {
     '/amcl_pose': pose_cov,
     '/drive': lambda m: {'cmd_steer': m.steering_angle, 'cmd_speed': m.speed},
     '/cmd_vel': lambda m: {'cmd_vx': m.linear.x, 'cmd_wz': m.angular.z},
+    '/nmpc/solve_time': lambda m: {'ms': m.data},
 }
 
 

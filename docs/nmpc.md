@@ -70,3 +70,30 @@ line, rms (max), cm:
 At 120% of the grip the NMPC gives up 7% of the lap time and lets the rear slip 12 deg. With
 the plain real time iteration (full step, no line search) at f 1.0: steering chatter on 63% of
 the steps, 28-38 deg of rear slip, 5-7 cm rms. Solve time 1.0-1.1 ms mean, 2.5 ms max, desktop.
+
+## Node
+
+`src/nmpc_node.cpp`, 50 Hz, publishes /drive and `nmpc/solve_time`. CMake runs
+`scripts/generate.py` at configure time: acados generates the solver in C from `ocp.py` with the
+numbers of `vehicle_params.yaml` built in, so a change there rebuilds it. RPATH to the acados
+libraries, no LD_LIBRARY_PATH at run time; ACADOS_SOURCE_DIR is needed to build.
+
+Measured: rear axle pose (map -> base_footprint), vx and yaw rate (/odometry/filtered), wheel
+speed (/joint_states). Lateral velocity and steering angle come from the previous solve, one step
+ahead. Stops like the Pure Pursuit node: after the laps, 0.5 m off the line, pose older than 0.2 s.
+
+    ros2 launch ackermann_bringup nmpc.launch.py mu_scale:=0.35 [use_sim_time:=true]
+
+## Gazebo
+
+The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the
+friction. Against /ground_truth, rms (max), cm:
+
+| mu_scale | profile / grip | Pure Pursuit | NMPC | localization, NMPC |
+|---|---|---|---|---|
+| 1.00 | ~40% | 4.7 (11) | 5.2 (12) | 5.6 |
+| 0.35 | ~105% | 7.6 (28) | 4.4 (11) | 7.2 |
+| 0.25 | ~150% | spins, lap 1 | 5.6 (14), 8% slower | 13 |
+
+On the tiles both follow a pose 5.6 cm off the truth: localization, not the controller, sets the
+error. Solve time 1.2-1.3 ms mean, 3.3 max after the first call (10 iterations, 15-21 ms).
