@@ -154,12 +154,19 @@ private:
     if (seen < history_.front().t) {
       return;
     }
-    // the estimate at that time: what it missed is still missing now
-    const auto & h = *std::min_element(history_.begin(), history_.end(), [&](const auto & p, const auto & q) {
+    // the estimate at that time: what it missed is still missing now, and in the estimates kept
+    // since, which the next scan compares against
+    const auto h = std::min_element(history_.begin(), history_.end(), [&](const auto & p, const auto & q) {
       return std::abs((p.t - seen).seconds()) < std::abs((q.t - seen).seconds());
     });
-    n_ += (radius_ - std::hypot(cx, cy)) - h.n;
-    e_ += std::remainder(std::atan2(cx, cy) - h.e, 2 * M_PI);
+    const double dn = (radius_ - std::hypot(cx, cy)) - h->n;
+    const double de = std::remainder(std::atan2(cx, cy) - h->e, 2 * M_PI);
+    for (auto p = h; p != history_.end(); p++) {
+      p->n += dn;
+      p->e += de;
+    }
+    n_ += dn;
+    e_ += de;
     last_cone_ = seen;
   }
 
