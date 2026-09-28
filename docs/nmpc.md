@@ -81,9 +81,10 @@ the steps, 7-9 cm at worst against 3. Solve time 0.5 ms mean, 1.3 ms max, deskto
 numbers of `vehicle_params.yaml` built in, so a change there rebuilds it. RPATH to the acados
 libraries, no LD_LIBRARY_PATH at run time; ACADOS_SOURCE_DIR is needed to build.
 
-Measured: rear axle pose (map -> base_footprint), vx and yaw rate (/odometry/filtered), wheel
+Measured: rear axle pose (the newest AMCL correction on the EKF odometry), vx and yaw rate (/odometry/filtered), wheel
 speed (/joint_states). Lateral velocity and steering angle come from the previous solve, one step
-ahead. Stops like the Pure Pursuit node: after the laps, 0.5 m off the line, pose older than 0.2 s.
+ahead. Stops after the laps, 0.5 m off the line, odometry older than 0.2 s or an AMCL correction older
+than 0.5 s.
 
     ros2 launch ackermann_bringup nmpc.launch.py mu_scale:=0.35 [use_sim_time:=true]
 
@@ -142,3 +143,27 @@ and AMCL running:
 
 The NMPC runs on the Pi with the last one: 10 ms at worst in a 20 ms loop. The drift problem
 takes the same, 5.5 / 6.3 / 6.4 ms.
+
+## On the car
+
+2026-09-28, localization and control on the Pi, 3 laps at full speed on the tiles
+(`nmpc.ipynb`). Rear axle off the line against the localization, rms (max), cm:
+
+| line | Pure Pursuit | NMPC | lap, PP / NMPC | steering rate, PP / NMPC |
+|---|---|---|---|---|
+| Phase 7 | 3.4 (8.5) | 3.5 (7.1) | 10.1-10.3 / 9.7 s | 0.25 / 0.45 rad/s |
+| tight (step 9.4) | 7.1 (19.4) | 2.7 (7.4) | 8.0 / 9.7 s | 0.36 / 0.67 rad/s |
+
+Solve time 8 ms mean, 17 at the 99th percentile, over the 20 ms step once in 1548. Measured with
+a tape at the stops, the localization was 8-11 cm behind the car along the line and 2-4 cm to the
+side.
+
+AMCL answers 0.15-0.19 s after the start of the scan and dates its correction 0.2 s ahead: the
+pose map -> base_footprint ran 0.1-0.2 s old at speed and a slow update stopped a run after 21 s.
+The node now takes the newest correction on the newest EKF odometry.
+
+On the tiles the error is the localization's, ~6 cm rms in Gazebo, and the NMPC chases it: it
+steers twice as much as Pure Pursuit for the same error. Two fixes tried in Gazebo, both left
+out: blending each AMCL correction in over 0.3 s changed nothing (5.5-6.0 cm on the tiles); a
+steering rate weight of 0.2 instead of 0.5 steers 20% less but loses the car at mu_scale 0.25,
+where the NMPC is worth having.
