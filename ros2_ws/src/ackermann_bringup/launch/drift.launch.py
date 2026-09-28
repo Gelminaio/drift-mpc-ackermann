@@ -31,6 +31,7 @@ def drift_node(context):
             'cone_y': float(LaunchConfiguration('cone_y').perform(context)),
             'launch_speed': float(LaunchConfiguration('launch_speed').perform(context)),
             'hold': float(LaunchConfiguration('hold').perform(context)),
+            'max_error': float(LaunchConfiguration('max_error').perform(context)),
             'mu_scale': mu,
             'drift_radius': float(radius), 'drift_heading': float(heading),
             'drift_vx': float(vx), 'drift_vy': float(vy), 'drift_r': float(r),
@@ -54,6 +55,7 @@ def generate_launch_description():
         DeclareLaunchArgument('cone_y', default_value='-0.023'),
         DeclareLaunchArgument('launch_speed', default_value='0.8'),
         DeclareLaunchArgument('hold', default_value='10.0'),
+        DeclareLaunchArgument('max_error', default_value='0.5'),     # m off the circle: stop
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         OpaqueFunction(function=drift_node),
