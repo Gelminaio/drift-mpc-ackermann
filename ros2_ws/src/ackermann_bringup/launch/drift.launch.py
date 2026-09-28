@@ -4,7 +4,7 @@ import numpy as np
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, Shutdown
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetParameter
 
@@ -26,7 +26,6 @@ def drift_node(context):
         executable='drift_node',
         name='drift',
         output='screen',
-        on_exit=Shutdown(),
         parameters=[params_file, {
             'cone_x': float(LaunchConfiguration('cone_x').perform(context)),
             'cone_y': float(LaunchConfiguration('cone_y').perform(context)),

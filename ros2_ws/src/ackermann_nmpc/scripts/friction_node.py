@@ -5,14 +5,13 @@ import numpy as np
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float32, Float64MultiArray
 
 from ackermann_nmpc import drift
 
 # The floor friction from the drift of drift_node: the mean of its state (drift/state) from 3 s
-# after the entry on, into drift.friction once a second
+# after the entry on, into drift.friction once a second. Ends with the drift node
 SETTLE = 150    # control steps of 20 ms
 EVERY = 50
 
@@ -25,8 +24,15 @@ class FrictionNode(Node):
         self.radius = self.declare_parameter('drift_radius', 0.0).value
         self.mu = self.declare_parameter('mu_scale', 1.0).value    # what the NMPC assumes, the first guess
         self.count, self.sum = 0, np.zeros(10)
+        self.drift_node_seen, self.done = False, False
         self.pub = self.create_publisher(Float32, 'drift/mu', 10)
         self.create_subscription(Float64MultiArray, 'drift/state', self.on_state, 10)
+        self.create_timer(0.5, self.check_drift_node)
+
+    def check_drift_node(self):
+        publishers = self.count_publishers('drift/state')
+        self.done = self.drift_node_seen and publishers == 0
+        self.drift_node_seen |= publishers > 0
 
     def on_state(self, m):
         self.count += 1
@@ -49,10 +55,14 @@ class FrictionNode(Node):
 
 def main():
     rclpy.init()
+    node = FrictionNode()
     try:
-        rclpy.spin(FrictionNode())
-    except (KeyboardInterrupt, ExternalShutdownException):
+        while rclpy.ok() and not node.done:
+            rclpy.spin_once(node)
+    except KeyboardInterrupt:
         pass
+    node.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
