@@ -87,6 +87,25 @@ ahead. Stops like the Pure Pursuit node: after the laps, 0.5 m off the line, pos
 
     ros2 launch ackermann_bringup nmpc.launch.py mu_scale:=0.35 [use_sim_time:=true]
 
+## Drift
+
+`src/drift_node.cpp`, the drift of `drift_ocp` around a cone (`notebooks/drift.ipynb`): straight
+from the start mark up to 0.8 m/s on the localization, the drift from where the cone is abeam,
+zero commands after `hold` s. In the drift the reference is the cone in the scan: at 3.3 rad/s
+AMCL is 12 cm rms off in Gazebo. The launch file computes the equilibrium and its circle
+(`drift.py`) from the steering and wheel speed.
+
+    ros2 launch ackermann_bringup drift.launch.py steering:=13 wheel_speed:=1.12 [use_sim_time:=true]
+
+Gazebo, the NMPC told mu_scale 1, rear axle from the cone, target 0.289 m:
+
+| reference | floor mu_scale | from the cone [m] | closest [m] | rear slip [deg] | steering [deg] |
+|---|---|---|---|---|---|
+| localization | 1.00 | 0.238 +- 0.042 | 0.116 | -19.4 | 28.4 |
+| cone | 1.00 | 0.288 +- 0.001 | 0.273 | -25.4 | 12.8 |
+| cone | 0.95 | 0.282 +- 0.002 | 0.266 | -32.2 | 6.8 |
+| cone | 1.05 | 0.300 +- 0.003 | 0.281 | -17.4 | 20.1 |
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the

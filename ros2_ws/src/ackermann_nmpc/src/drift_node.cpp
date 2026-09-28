@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -8,6 +9,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/float32.hpp>
 #include <tf2/exceptions.h>
 #include <tf2_ros/buffer.h>
@@ -17,9 +19,15 @@
 #include "acados_solver_drift.h"
 
 // The drift of ocp.drift_ocp around a cone, from rest: straight ahead up to launch_speed, the
-// drift NMPC from the closest point to the cone for hold seconds, then zero commands. Measured:
-// rear axle pose (localization), yaw rate (EKF), wheel speed (encoders). In the drift vx, vy and
-// the steering angle come from the previous solve: the wheels no longer tell the ground speed.
+// drift NMPC from the closest point to the cone for hold seconds, then zero commands. The run-up
+// uses the localization. In the drift the cone is the reference: seen from the rear axle at
+// distance rho and angle atan2(x, y), it gives the offset n = radius - rho and the heading error
+// directly. Between scans the model carries them. vx, vy and the steering angle come from the
+// previous solve (the wheels no longer tell the ground speed), the yaw rate from the gyro.
+
+constexpr double CONE_WINDOW = 0.15;   // m around where the cone should be
+constexpr double CONE_RADIUS = 0.02;   // m at the height of the lidar
+constexpr double CONE_TIMEOUT = 0.5;   // s without the cone: stop
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -86,6 +94,8 @@ public:
         vx_ekf_ = m.twist.twist.linear.x;
         r_ = m.twist.twist.angular.z;
       });
+    sub_scan_ = create_subscription<sensor_msgs::msg::LaserScan>(
+      "/scan", rclcpp::SensorDataQoS(), [this](const sensor_msgs::msg::LaserScan & m) { on_scan(m); });
     sub_joints_ = create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", 10, [this](const sensor_msgs::msg::JointState & m) {
         if (m.velocity.size() >= 2) {
@@ -105,6 +115,52 @@ public:
   }
 
 private:
+  void on_scan(const sensor_msgs::msg::LaserScan & m)
+  {
+    if (history_.empty()) {    // not drifting yet
+      return;
+    }
+    // the lidar faces forward on the center line (URDF)
+    if (std::isnan(lidar_x_)) {
+      lidar_x_ = tf_buffer_->lookupTransform("base_footprint", m.header.frame_id, tf2::TimePointZero).transform.translation.x;
+    }
+    // where the cone should be in the lidar frame, from the estimate now
+    const double rho = radius_ - n_;
+    const double px = rho * std::sin(e_) - lidar_x_, py = rho * std::cos(e_);
+    double sx = 0, sy = 0;
+    int count = 0;
+    for (size_t i = 0; i < m.ranges.size(); i++) {
+      const double a = m.angle_min + i * m.angle_increment;
+      const double x = m.ranges[i] * std::cos(a), y = m.ranges[i] * std::sin(a);
+      if (std::isfinite(m.ranges[i]) && std::hypot(x - px, y - py) < CONE_WINDOW) {
+        sx += x;
+        sy += y;
+        count++;
+      }
+    }
+    if (count < 2) {
+      return;
+    }
+    // the rays see the near side of the cone, evenly spaced across it: its centre is pi/4 radius
+    // further along the ray
+    const double a = std::atan2(sy, sx);
+    const double cx = sx / count + M_PI / 4 * CONE_RADIUS * std::cos(a) + lidar_x_;
+    const double cy = sy / count + M_PI / 4 * CONE_RADIUS * std::sin(a);
+    // when the cone was seen: rplidar_ros stamps the start of the turn, which begins behind and
+    // goes clockwise (a = pi - lidar angle); the sim has scan_time 0
+    const rclcpp::Time seen = rclcpp::Time(m.header.stamp) + rclcpp::Duration::from_seconds(m.scan_time * (M_PI - a) / (2 * M_PI));
+    if (seen < history_.front().t) {
+      return;
+    }
+    // the estimate at that time: what it missed is still missing now
+    const auto & h = *std::min_element(history_.begin(), history_.end(), [&](const auto & p, const auto & q) {
+      return std::abs((p.t - seen).seconds()) < std::abs((q.t - seen).seconds());
+    });
+    n_ += (radius_ - std::hypot(cx, cy)) - h.n;
+    e_ += std::remainder(std::atan2(cx, cy) - h.e, 2 * M_PI);
+    last_cone_ = seen;
+  }
+
   void publish(double d_cmd, double u_cmd)
   {
     ackermann_msgs::msg::AckermannDrive msg;
@@ -135,38 +191,32 @@ private:
       stop(stopped_);
       return;
     }
-    geometry_msgs::msg::TransformStamped tf;
-    try {
-      tf = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero);
-    } catch (const tf2::TransformException &) {
-      if (launched_) {
-        stop("no pose");
-      } else {
-        pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());    // wait for localization
-      }
-      return;
-    }
     const rclcpp::Time now = get_clock()->now();
-    const double age = (now - rclcpp::Time(tf.header.stamp)).seconds();
-    if (age > max_pose_age_) {
-      if (launched_) {
-        stop("pose " + std::to_string(age) + " s old");
-      } else {
-        pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
-      }
-      return;
-    }
-
-    // the rear axle around the cone, counterclockwise: angle, offset inside the circle, heading
-    // error to its tangent
-    const double dx = tf.transform.translation.x - cone_x_, dy = tf.transform.translation.y - cone_y_;
-    const double yaw = 2 * std::atan2(tf.transform.rotation.z, tf.transform.rotation.w);
-    theta_ += std::remainder(std::atan2(dy, dx) - theta_, 2 * M_PI);
-    const double n = radius_ - std::hypot(dx, dy);
-    const double e_psi = std::remainder(yaw - theta_ - M_PI / 2, 2 * M_PI);
-
     if (!drifting_) {
-      // straight ahead, the wheel speed ramping up, until the cone is abeam
+      // the run-up on the localization: straight ahead, the wheel speed ramping up, until the
+      // cone is abeam
+      geometry_msgs::msg::TransformStamped tf;
+      try {
+        tf = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero);
+      } catch (const tf2::TransformException &) {
+        if (launched_) {
+          stop("no pose");
+        } else {
+          pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());    // wait for localization
+        }
+        return;
+      }
+      const double age = (now - rclcpp::Time(tf.header.stamp)).seconds();
+      if (age > max_pose_age_) {
+        if (launched_) {
+          stop("pose " + std::to_string(age) + " s old");
+        } else {
+          pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
+        }
+        return;
+      }
+      const double dx = tf.transform.translation.x - cone_x_, dy = tf.transform.translation.y - cone_y_;
+      const double yaw = 2 * std::atan2(tf.transform.rotation.z, tf.transform.rotation.w);
       launched_ = true;
       u_cmd_ = std::min(launch_speed_, u_cmd_ + 5.0 * in_->Ts[0]);
       d_cmd_ = 0;
@@ -174,20 +224,29 @@ private:
       if (dx * std::cos(yaw) + dy * std::sin(yaw) < 0) {
         return;
       }
+      // the rear axle around the cone, counterclockwise: offset inside the circle, heading
+      // error to its tangent
       drifting_ = true;
-      drift_start_ = now;
+      drift_start_ = last_cone_ = now;
       vx_ = vx_ekf_;
+      n_ = radius_ - std::hypot(dx, dy);
+      e_ = std::remainder(yaw - std::atan2(dy, dx) - M_PI / 2, 2 * M_PI);
     }
     if ((now - drift_start_).seconds() > hold_) {
       stop("drift held " + std::to_string(hold_) + " s");
       return;
     }
-    if (std::abs(n) > max_error_) {
-      stop(std::to_string(n) + " m off the circle");
+    if ((now - last_cone_).seconds() > CONE_TIMEOUT) {
+      stop("cone lost");
+      return;
+    }
+    if (std::abs(n_) > max_error_) {
+      stop(std::to_string(n_) + " m off the circle");
       return;
     }
 
-    double x0[DRIFT_NX] = {radius_ * theta_, n, e_psi, vx_, vy_, r_, d_, u_, d_cmd_, u_cmd_};
+    // s = 0: the circle is the same everywhere
+    double x0[DRIFT_NX] = {0, n_, e_, vx_, vy_, r_, d_, u_, d_cmd_, u_cmd_};
     double x[DRIFT_NX];
     const bool first = !solved_;
     if (first) {
@@ -210,6 +269,12 @@ private:
     }
 
     ocp_nlp_out_get(config_, dims_, out_, 1, "x", x);
+    history_.push_back({now, n_, e_});
+    if (history_.size() > 25) {
+      history_.pop_front();
+    }
+    n_ = x[1];
+    e_ = x[2];
     vx_ = x[3];
     vy_ = x[4];
     d_ = x[6];
@@ -220,6 +285,12 @@ private:
     st.data = solve_time * 1e3;
     pub_solve_time_->publish(st);
   }
+
+  struct Estimate
+  {
+    rclcpp::Time t;
+    double n, e;
+  };
 
   double wheel_radius_, cone_x_, cone_y_, launch_speed_, hold_, mu_scale_, max_error_, max_pose_age_, radius_;
   std::vector<double> steer_cmd_, steer_angle_;
@@ -234,7 +305,9 @@ private:
   // measured, and estimated one step ahead by the NMPC
   double vx_ekf_ = 0, r_ = 0, u_ = 0, vx_ = 0, vy_ = 0, d_ = 0;
   double d_cmd_ = 0, u_cmd_ = 0;
-  double theta_ = 0;
+  double n_ = 0, e_ = 0, lidar_x_ = NAN;    // offset and heading error to the circle, from the cone
+  std::deque<Estimate> history_;            // the last 0.5 s of them
+  rclcpp::Time last_cone_;
   bool launched_ = false, drifting_ = false, solved_ = false;
   rclcpp::Time drift_start_;
   std::string stopped_;
@@ -246,6 +319,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr pub_solve_time_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joints_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
