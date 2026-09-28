@@ -18,9 +18,10 @@
 #include "acados_c/ocp_nlp_interface.h"
 #include "acados_solver_nmpc.h"
 
-// The NMPC of ocp.py on the car, 50 Hz. Measured: rear axle pose in the map (localization),
-// vx and yaw rate (EKF), wheel speed (encoders). Lateral velocity and steering angle are not
-// measured: they come from the previous solve, one step ahead. Stops as the Pure Pursuit node.
+// The NMPC of ocp.py on the car, one solve per first stage of the horizon (20 ms). Measured: rear
+// axle pose in the map (localization), vx and yaw rate (EKF), wheel speed (encoders). Lateral
+// velocity and steering angle are not measured: they come from the previous solve, one step
+// ahead. Stops as the Pure Pursuit node.
 
 struct Track
 {
@@ -109,7 +110,10 @@ public:
           u_ = wheel_radius_ * (m.velocity[0] + m.velocity[1]) / 2;
         }
       });
-    timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::milliseconds(20), [this] { tick(); });
+    // one control step per first stage of the horizon
+    const auto period = std::chrono::duration<double>(in_->Ts[0]);
+    timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+                                  [this] { tick(); });
   }
 
   ~NmpcNode() override
@@ -228,18 +232,10 @@ private:
     }
 
     double x0[NMPC_NX] = {s, n, e_psi, vx_, vy_, r_, d_, u_, d_cmd_, u_cmd_};
-    double x[NMPC_NX], u[NMPC_NU];
+    double x[NMPC_NX];
     if (!started_) {
       for (int j = 0; j <= NMPC_N; j++) {
         ocp_nlp_out_set(config_, dims_, out_, in_, j, "x", x0);
-      }
-    } else {
-      // warm start: the previous solution one stage later
-      for (int j = 0; j < NMPC_N; j++) {
-        ocp_nlp_out_get(config_, dims_, out_, j + 1, "x", x);
-        ocp_nlp_out_set(config_, dims_, out_, in_, j, "x", x);
-        ocp_nlp_out_get(config_, dims_, out_, std::min(j + 1, NMPC_N - 1), "u", u);
-        ocp_nlp_out_set(config_, dims_, out_, in_, j, "u", u);
       }
     }
     // curvature and speed of the line where the previous solution puts each stage

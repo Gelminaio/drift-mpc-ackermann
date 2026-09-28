@@ -8,8 +8,11 @@ from ackermann_nmpc.model import path_model
 # Two problems on the Phase 5 model, same constraints and solver: follow a line at the speed of a
 # profile (ocp), or hold a drift on a circle (drift_ocp). No bound on the slip: the tires may
 # saturate.
-N = 50          # stages
-DT = 0.02       # s, as the control loop: horizon 1.0 s
+# 1 s ahead in 25 stages, 20 ms near and 53 ms far: 50 stages of 20 ms take 10 ms a solve on the
+# Pi, too close to the 20 ms loop; 25 of 40 ms held the line worse at the edge of the grip
+TIME_STEPS = np.r_[np.full(10, 0.02), np.full(15, 0.8 / 15)]
+N = len(TIME_STEPS)
+DT = TIME_STEPS[0]      # s, the control loop (50 Hz)
 N_MAX = 0.3     # m off the line, soft
 VX_MIN = 0.3    # m/s, soft: below it the tire model is singular
 DD_MAX = 4.36   # rad/s, servo rate (vehicle_params steer_rate_max)
@@ -43,13 +46,14 @@ def car(p, code_dir):
     o.parameter_values = np.array([1.0, 0.0])
 
     o.solver_options.N_horizon = N
-    o.solver_options.tf = N * DT
+    o.solver_options.tf = TIME_STEPS.sum()
+    o.solver_options.time_steps = TIME_STEPS
     # implicit: the front tire makes the model stiff at low speed (1.4 ms at 0.3 m/s)
     o.solver_options.integrator_type = 'IRK'
     o.solver_options.sim_method_num_stages = 2
     o.solver_options.sim_method_num_steps = 1
     # one Gauss-Newton iteration per step, damped by a line search: the full step overshoots
-    # where the tires saturate and the commands chatter
+    # where the tires saturate and the commands chatter. Warm start: the previous solution
     o.solver_options.nlp_solver_type = 'SQP'
     o.solver_options.nlp_solver_max_iter = 1
     o.solver_options.globalization = 'MERIT_BACKTRACKING'
