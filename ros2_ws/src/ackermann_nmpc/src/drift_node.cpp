@@ -263,7 +263,8 @@ private:
       history_.pop_front();
     }
 
-    if (!launched_ && scans_ < 3) {    // the cone in three scans before moving
+    // before moving: the cone in three scans, and the friction node up (3 s to start on the Pi)
+    if (!launched_ && (scans_ < 3 || count_publishers("drift/mu") == 0)) {
       pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
       return;
     }
