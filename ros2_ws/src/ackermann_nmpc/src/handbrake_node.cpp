@@ -11,9 +11,9 @@
 
 // Handbrake turn to a heading, from rest. Straight up to speed, full lock at speed, then at brake_at
 // (heading from the gyro) speed 0: the motor driver brakes the rear wheels and the car slides. In the
-// slide the steering decides how far it still turns (7 deg countersteered to 57 at full lock, from
-// 136 deg on the tiles): every step the Phase 5 model, rear friction x locked_friction, is run to the
-// stop for a steering held constant, and bisection finds the one that stops at target.
+// slide the steering decides how far it still turns (21-29 deg with the wheels straight, 41-57 at full
+// lock, from 136 deg on the tiles): every step the Phase 5 model, rear friction x locked_friction, is run
+// to the stop for a steering held constant, and bisection finds the one that stops at target.
 // The model state in the slide: yaw rate from the gyro, steering from the commands through the lag,
 // vx and vy carried by the model from brake_vx, brake_vy (the wheels are locked).
 
@@ -24,6 +24,9 @@ constexpr double T_ARM = 0.5;        // s armed at rest before starting
 constexpr double T_SLIDE = 1.5;      // s from the brake to the end
 constexpr double T_TURN = 3.0;       // s at full lock without reaching brake_at: stop
 constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
+// steering command in the slide, from full lock down to this: countersteered further the car swings
+// back 9-12 deg at the end of the slide (hb_cs, hbn runs), which the model does not do
+constexpr double SLIDE_STEER_MIN = -0.15;
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -71,10 +74,10 @@ public:
     // the run
     speed_ = declare_parameter("speed", 1.5);        // m/s command, above what the motor reaches
     straight_ = declare_parameter("straight", 0.5);  // s at speed before the turn
-    brake_at_ = declare_parameter("brake_at", 150.0) * M_PI / 180;
+    brake_at_ = declare_parameter("brake_at", 145.0) * M_PI / 180;
     target_ = declare_parameter("target", 180.0) * M_PI / 180;
-    // a locked rear slides with more friction than a spinning one (hb_park, hb_sw runs, 2026-09-29)
-    locked_friction_ = declare_parameter("locked_friction", 1.4);
+    // a locked rear slides with more friction than a spinning one (yaw rate of 16 slides, 2026-09-29)
+    locked_friction_ = declare_parameter("locked_friction", 1.5);
     // rear axle velocity at the brake, video of the hb_park and hb_sw runs
     brake_vx_ = declare_parameter("brake_vx", 0.82);
     brake_vy_ = declare_parameter("brake_vy", -0.10);
@@ -158,7 +161,7 @@ private:
 
   double slide_steering() const
   {
-    const double full = steer_cmd_.back(), counter = steer_cmd_.front();
+    const double full = steer_cmd_.back(), counter = SLIDE_STEER_MIN;
     if (final_heading(model_, heading_, u_, counter) >= target_) {
       return counter;
     }
