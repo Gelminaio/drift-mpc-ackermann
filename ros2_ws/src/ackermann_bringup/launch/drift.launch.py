@@ -49,7 +49,7 @@ def drift_node(context):
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('steering', default_value='13.0'),     # deg, the drift of drift.ipynb
+        DeclareLaunchArgument('steering', default_value='14.0'),     # deg: the wide drift, 0.30 m around the cone
         DeclareLaunchArgument('wheel_speed', default_value='1.12'),  # m/s
         DeclareLaunchArgument('mu_scale', default_value='1.0'),      # floor friction the NMPC assumes
         # 0.8 m ahead of the start mark and 0.29 m to its left: the run-up is the circle's tangent
