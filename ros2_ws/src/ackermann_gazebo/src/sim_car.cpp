@@ -54,7 +54,7 @@ using State = std::array<double, N>;
 struct Params
 {
   double mass, iz, lf, lr, track, wheel_radius, nf, nr;
-  double mu_f, b_f, mu_r, b_r, c, steer_lag, brake_lag, v_max;
+  double mu_f, b_f, mu_r, b_r, c, lambda, load_transfer, h_cg, steer_lag, brake_lag, v_max;
   std::vector<double> steer_cmd, steer_angle, speed_lag_v, speed_lag;
 };
 
@@ -74,12 +74,13 @@ double interp(double x, const std::vector<double> & xs, const std::vector<double
 // Floor friction mu_scale times the tiles: the peak force scales with it, the stiffness at
 // small slip does not (brush model), so mu -> mu_scale mu and B -> B / mu_scale.
 
-// one rear wheel at surface speed u: force against its sliding direction
-void rear_wheel(const Params & p, double mu_scale, double vx, double vy, double u, double & fx, double & fy)
+// one rear wheel at surface speed u under load n: force against its sliding direction, the
+// longitudinal slip weighed down by lambda (1 in the model)
+void rear_wheel(const Params & p, double mu_scale, double n, double vx, double vy, double u, double & fx, double & fy)
 {
-  const double sx = (vx - u) / std::max(u, 0.1), sy = vy / std::max(u, 0.1);
+  const double sx = (vx - u) / std::max(u, 0.1) / p.lambda, sy = vy / std::max(u, 0.1);
   const double s = std::hypot(sx, sy) + 1e-9;
-  const double f = mu_scale * p.mu_r * p.nr / 2 * std::sin(p.c * std::atan(p.b_r / mu_scale * s));
+  const double f = mu_scale * p.mu_r * n * std::sin(p.c * std::atan(p.b_r / mu_scale * s));
   fx = -f * sx / s;
   fy = -f * sy / s;
 }
@@ -89,9 +90,11 @@ State deriv(const Params & p, double mu_scale, const State & x, double d_cmd, do
   const double vx = std::max(x[VX], 0.05), vy = x[VY], r = x[R], d = x[D];
   const double alpha_f = d - std::atan((vy + p.lf * r) / vx);
   const double fyf = mu_scale * p.mu_f * p.nf * std::sin(p.c * std::atan(p.b_f / mu_scale * alpha_f));
+  // load from the inner (left) to the outer rear wheel: load_transfer of m ay h / T (0 in the model)
+  const double dn = p.load_transfer * p.mass * vx * r * p.h_cg / p.track;
   double fxl, fyl, fxr, fyr;
-  rear_wheel(p, mu_scale, vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
-  rear_wheel(p, mu_scale, vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
+  rear_wheel(p, mu_scale, std::max(p.nr / 2 - dn, 0.0), vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
+  rear_wheel(p, mu_scale, std::max(p.nr / 2 + dn, 0.0), vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
   const double fx = fxl + fxr - fyf * std::sin(d);
   const double fy = fyf * std::cos(d) + fyl + fyr;
   const double mz = p.lf * fyf * std::cos(d) - p.lr * (fyl + fyr) + p.track / 2 * (fxr - fxl);
@@ -147,6 +150,7 @@ public:
     p_.mu_r = y["tire_mu_r"].as<double>();
     p_.b_r = y["tire_b_r"].as<double>();
     p_.c = y["tire_c"].as<double>();
+    p_.h_cg = y["h_cg"].as<double>();
     p_.steer_lag = y["steer_lag"].as<double>();
     p_.brake_lag = y["brake_lag"].as<double>();
     p_.v_max = y["v_max"].as<double>();
@@ -168,6 +172,9 @@ public:
     range.floating_point_range[0].from_value = 0.1;
     range.floating_point_range[0].to_value = 2.0;
     node_->declare_parameter("mu_scale", 1.0, range);
+    // the tire of this car, the model's unless set: to test a controller against a car unlike its
+    // model. mu_f, b_f, mu_r, b_r, c, lambda, load_transfer
+    node_->declare_parameter("tire", std::vector<double>{p_.mu_f, p_.b_f, p_.mu_r, p_.b_r, p_.c, 1.0, 0.0});
     pub_joints_ = node_->create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
     pub_imu_ = node_->create_publisher<sensor_msgs::msg::Imu>("imu/data_raw", 10);
     pub_steering_ = node_->create_publisher<std_msgs::msg::Float32>("steering_angle", 10);
@@ -229,6 +236,14 @@ public:
       u_cmd = std::clamp(setpoint, -p_.v_max, p_.v_max);
       tau_u = interp(std::abs(setpoint), p_.speed_lag_v, p_.speed_lag);
     }
+    const auto tire = node_->get_parameter("tire").as_double_array();
+    p_.mu_f = tire[0];
+    p_.b_f = tire[1];
+    p_.mu_r = tire[2];
+    p_.b_r = tire[3];
+    p_.c = tire[4];
+    p_.lambda = tire[5];
+    p_.load_transfer = tire[6];
     step(node_->get_parameter("mu_scale").as_double(), d_cmd, u_cmd, tau_u, h);
     wheel_ema_ += h / WHEEL_EMA_TAU * (x_[U] - wheel_ema_);
     wheel_angle_ += x_[U] / p_.wheel_radius * h;

@@ -19,8 +19,11 @@ def drift_node(context):
     d = np.radians(float(LaunchConfiguration('steering').perform(context)))
     u = float(LaunchConfiguration('wheel_speed').perform(context))
     mu = float(LaunchConfiguration('mu_scale').perform(context))
-    vx, vy, r = drift.equilibrium(p, d, u, mu)
+    # the tight drift, the one the car holds by itself (drift.ipynb); the wide one needs the car
+    # to slide with less steering or throttle, which it does not
+    vx, vy, r = drift.equilibrium(p, d, u, mu, guess=(0.55, -0.2, 3.2))
     radius, heading = drift.circle(p, vx, vy, r)
+    donut_vx, donut_vy, _ = drift.equilibrium(p, max(p['steer_angle']), u, mu, guess=(0.46, -0.15, 4.0))
     return [Node(
         package='ackermann_nmpc',
         executable='drift_node',
@@ -29,12 +32,16 @@ def drift_node(context):
         parameters=[params_file, {
             'cone_x': float(LaunchConfiguration('cone_x').perform(context)),
             'cone_y': float(LaunchConfiguration('cone_y').perform(context)),
+            'cone_radius': float(LaunchConfiguration('cone_radius').perform(context)),
             'launch_speed': float(LaunchConfiguration('launch_speed').perform(context)),
             'hold': float(LaunchConfiguration('hold').perform(context)),
+            'max_error': float(LaunchConfiguration('max_error').perform(context)),
+            'steer_floor': float(np.radians(float(LaunchConfiguration('steer_floor').perform(context)))),
             'mu_scale': mu,
             'drift_radius': float(radius), 'drift_heading': float(heading),
             'drift_vx': float(vx), 'drift_vy': float(vy), 'drift_r': float(r),
-            'drift_steering': float(d), 'drift_wheel_speed': u}],
+            'drift_steering': float(d), 'drift_wheel_speed': u,
+            'donut_vx': float(donut_vx), 'donut_vy': float(donut_vy)}],
     ), Node(
         package='ackermann_nmpc',
         executable='friction_node.py',
@@ -46,14 +53,17 @@ def drift_node(context):
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('steering', default_value='13.0'),     # deg, the drift of drift.ipynb
+        DeclareLaunchArgument('steering', default_value='16.0'),     # deg: the rear axle 0.21 m around the cone
+        DeclareLaunchArgument('steer_floor', default_value='14.0'),  # deg: less and the car regrips
         DeclareLaunchArgument('wheel_speed', default_value='1.12'),  # m/s
         DeclareLaunchArgument('mu_scale', default_value='1.0'),      # floor friction the NMPC assumes
         # 0.8 m ahead of the start mark and 0.29 m to its left: the run-up is the circle's tangent
         DeclareLaunchArgument('cone_x', default_value='3.774'),
         DeclareLaunchArgument('cone_y', default_value='-0.023'),
+        DeclareLaunchArgument('cone_radius', default_value='0.0105'),   # m, a 2.1 cm tube
         DeclareLaunchArgument('launch_speed', default_value='0.8'),
         DeclareLaunchArgument('hold', default_value='10.0'),
+        DeclareLaunchArgument('max_error', default_value='0.5'),     # m off the circle: stop
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         OpaqueFunction(function=drift_node),

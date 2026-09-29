@@ -115,6 +115,13 @@ on `drift/mu`. Gazebo, the NMPC told 1.00: floors 0.90 / 0.95 / 1.00 / 1.05 / 1.
 0.897 / 0.950 / 1.001 / 1.049 / 1.094. With /scan held back 0.15 s (`scripts/scan_delay.py`, the
 latency of the A1) 1.000 and 0.951, the circle within 1.1 cm.
 
+On the car (step 10.6, runs `drift_car1`-`9`) the node reaches the cone on the line, with the cone
+tracked in the rear axle frame from the start, but the drift never held more than 0.5 s. The rear
+lets go only on a torque step (full lock, full throttle); open loop the car keeps sliding only at
+16 deg and more, on a tight circle (0.19 m of CG radius at 16 deg), and grips again 0.25-0.5 s after
+any correction, less steering or less wheel speed. The drift of the table (13-14 deg, 0.27-0.28 m)
+is the unstable middle state of the model: the NMPC holds it in Gazebo, not on the car.
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the

@@ -17,7 +17,7 @@ class ScanDelay(Node):
         super().__init__('scan_delay')
         self.queue = deque()
         self.pub = self.create_publisher(LaserScan, '/scan_late', qos_profile_sensor_data)
-        self.create_subscription(LaserScan, '/scan', self.queue.append, qos_profile_sensor_data)
+        self.create_subscription(LaserScan, '/scan', lambda m: self.queue.append(m), qos_profile_sensor_data)
         self.create_timer(0.005, self.tick)
 
     def tick(self):
