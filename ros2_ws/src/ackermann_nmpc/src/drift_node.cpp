@@ -81,6 +81,9 @@ public:
     hold_ = declare_parameter("hold", 10.0);                 // s of drift
     mu_scale_ = declare_parameter("mu_scale", 1.0);          // floor friction the NMPC assumes
     max_error_ = declare_parameter("max_error", 0.5);        // m off the circle: stop
+    // rad: the car regrips when the steering opens below ~14 deg in a drift (open-loop sweep),
+    // the models do not know it
+    const double steer_floor = declare_parameter("steer_floor", 0.24);
     // the drift equilibrium and its circle, from drift.py (drift.launch.py)
     radius_ = declare_parameter<double>("drift_radius");
     const double heading = declare_parameter<double>("drift_heading");
@@ -108,6 +111,12 @@ public:
     for (int j = 0; j <= DRIFT_N; j++) {
       ocp_nlp_cost_model_set(config_, dims_, in_, j, "yref", yref);
       drift_acados_update_params(capsule_, j, p, DRIFT_NP);
+    }
+    for (int j = 1; j < DRIFT_N; j++) {
+      double lbx[4];    // on n, vx, d_cmd, u_cmd (ocp.py)
+      ocp_nlp_constraints_model_get(config_, dims_, in_, j, "lbx", lbx);
+      lbx[2] = steer_floor;
+      ocp_nlp_constraints_model_set(config_, dims_, in_, out_, j, "lbx", lbx);
     }
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
