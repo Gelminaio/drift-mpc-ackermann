@@ -14,7 +14,7 @@ A 1:10 scale autonomous vehicle that drives at the limit of tire adhesion — co
 
 ## Abstract
 
-This project investigates aggressive trajectory tracking at the limit of tire adhesion for small-scale autonomous ground vehicles. A Nonlinear MPC controller, formulated on an identified dynamic bicycle model with a nonlinear (Pacejka-type) tire model, regulates trajectory tracking while operating in the saturated-friction regime, enabling controlled oversteer (drift) rather than avoiding it. The road–tire friction coefficient is estimated online while the car drifts and enters the MPC model, so the maneuvers that follow are planned for the grip of the floor it is on. The full stack runs distributed over a ROS 2 Jazzy network spanning an ESP32 real-time controller, a Raspberry Pi 4 sensor bridge, and a base-station compute host. The final demonstration is an autonomous gymkhana: a drift around a cone ending in a sideways slide into a parking gap, on two surfaces, with a Gazebo digital twin of the car alongside.
+This project investigates aggressive trajectory tracking at the limit of tire adhesion for small-scale autonomous ground vehicles. A Nonlinear MPC controller, formulated on an identified dynamic bicycle model with a nonlinear (Pacejka-type) tire model, regulates trajectory tracking while operating in the saturated-friction regime, enabling controlled oversteer (drift) rather than avoiding it. The road–tire friction coefficient is estimated online and enters the model, so the maneuvers that follow are planned for the grip of the floor it is on. The full stack runs distributed over a ROS 2 Jazzy network spanning an ESP32 real-time controller, a Raspberry Pi 4 sensor bridge, and a base-station compute host. The final demonstration is autonomous drift parking: a handbrake turn and a sideways slide into a gap between two boxes, steered by the model while the rear wheels slide locked, on two surfaces, with a Gazebo digital twin of the car alongside.
 
 ---
 
@@ -159,9 +159,9 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 7** — Track, racing line & baseline controller
 - [x] **Phase 8** — Simulation & digital twin (friction randomization)
 - [x] **Phase 9** — Dynamic NMPC at the limit of adhesion (acados)
-- [ ] **Phase 10** — Autonomous drift around a target, friction estimated from the drift
-- [ ] **Phase 11** — Drift parking planned with the estimated friction, on two surfaces
-- [ ] **Phase 12** — Autonomous gymkhana: one-take run, onboard HUD video, technical report
+- [x] **Phase 10** — Drift around a target, friction estimated from the drift (Gazebo; on the car the drift does not hold)
+- [ ] **Phase 11** — Drift parking: handbrake turn and slide steered by the model, on two surfaces
+- [ ] **Phase 12** — One-take autonomous run, onboard HUD video, technical report
 
 Track progress via [GitHub Milestones](../../milestones).
 
@@ -251,11 +251,27 @@ overhead phone video tracking two markers on the car, plus IMU and encoders.
   the localization sets the error.
 - [`notebooks/nmpc.ipynb`](notebooks/nmpc.ipynb), [`docs/nmpc.md`](docs/nmpc.md).
 
+### Phase 10 — Drift around a target
+
+<p align="center">
+  <img src="media/drift.png" alt="The drift NMPC around a cone in Gazebo, and the rear slip of the car when the steering opens from the donut" width="90%"/>
+</p>
+
+- The drift NMPC on a circle around a cone, the cone as the reference in the lidar scan. Gazebo:
+  the rear axle 28.8 +- 0.1 cm from the cone against 28.9, within 1.1 cm with the scan 0.15 s late.
+- Friction from the drift: on the circle the state is known and the model has one steady state per
+  friction. Five floors in Gazebo, estimates within 0.6%.
+- On the car the drift does not hold. The rear lets go only on a torque step, and open loop the car
+  keeps sliding only from 16 deg of steering, on a 0.19 m circle; any correction grips it again
+  within 0.5 s. The drift of the simulator (13-14 deg, 0.28 m) is the unstable middle steady state
+  of the model. Phase 11 moves to the slide with the rear wheels locked.
+- [`notebooks/drift.ipynb`](notebooks/drift.ipynb), [`docs/nmpc.md`](docs/nmpc.md).
+
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
 Planned deliverables include:
-- An autonomous gymkhana in one take: through a cone gate at the limit, a drift around a cone, a sideways slide into a parking gap. Overhead and onboard view, the NMPC plan drawn on the onboard camera
-- The grip of the floor estimated during the drift and used to plan the slide: the same run on two surfaces, against the friction held fixed
+- Autonomous drift parking in one take: a handbrake turn and a sideways slide into a gap between boxes, steered by the model with the rear wheels locked. Overhead and onboard view, the plan drawn on the onboard camera
+- The grip of the floor measured by the car and used to plan the slide: the same run on two surfaces, against the friction held fixed
 
 ---
 
