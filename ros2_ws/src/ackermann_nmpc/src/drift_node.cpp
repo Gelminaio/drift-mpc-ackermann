@@ -31,7 +31,6 @@
 // previous solve, the yaw rate from the gyro (EKF).
 
 constexpr double CONE_WINDOW = 0.15;   // m around where the cone should be
-constexpr double CONE_RADIUS = 0.042;  // m, the cardboard tube used as the cone
 constexpr double CONE_TIMEOUT = 0.5;   // s without the cone: stop
 constexpr double LOOKAHEAD = 0.4;      // m, pure pursuit in the run-up
 constexpr double HANDOVER = 0.10;      // m before the cone is abeam: the steering lag, 0.17 s
@@ -77,6 +76,7 @@ public:
     // the cone, in the map, and the run
     cone_x_ = declare_parameter<double>("cone_x");
     cone_y_ = declare_parameter<double>("cone_y");
+    cone_radius_ = declare_parameter<double>("cone_radius");    // m, at the height of the lidar
     launch_speed_ = declare_parameter("launch_speed", 0.8);  // m/s at the wheels before the drift
     hold_ = declare_parameter("hold", 10.0);                 // s of drift
     mu_scale_ = declare_parameter("mu_scale", 1.0);          // floor friction the NMPC assumes
@@ -170,7 +170,7 @@ private:
     // pull the centre towards the prediction
     double px = p->cx - lidar_x_, py = p->cy, sx = 0, sy = 0;
     int count = 0;
-    for (const double window : {CONE_WINDOW, 2 * CONE_RADIUS}) {
+    for (const double window : {CONE_WINDOW, 2 * cone_radius_ + 0.02}) {
       sx = sy = 0;
       count = 0;
       for (size_t i = 0; i < m.ranges.size(); i++) {
@@ -191,8 +191,8 @@ private:
     // the rays see the near side of the cone, evenly spaced across it: its centre is pi/4 radius
     // further along the ray
     const double a = std::atan2(sy, sx);
-    const double cx = sx / count + M_PI / 4 * CONE_RADIUS * std::cos(a) + lidar_x_;
-    const double cy = sy / count + M_PI / 4 * CONE_RADIUS * std::sin(a);
+    const double cx = sx / count + M_PI / 4 * cone_radius_ * std::cos(a) + lidar_x_;
+    const double cy = sy / count + M_PI / 4 * cone_radius_ * std::sin(a);
     const rclcpp::Time seen = when(a);
     if (seen < history_.front().t) {
       return;
@@ -399,7 +399,7 @@ private:
     pub_solve_time_->publish(st);
   }
 
-  double wheel_radius_, wheelbase_, lr_, v_max_, cone_x_, cone_y_, launch_speed_, hold_, mu_scale_, max_error_,
+  double wheel_radius_, wheelbase_, lr_, v_max_, cone_x_, cone_y_, cone_radius_, launch_speed_, hold_, mu_scale_, max_error_,
     radius_, donut_vx_, donut_vy_, full_lock_;
   std::vector<double> steer_cmd_, steer_angle_;
 

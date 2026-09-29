@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
-<!-- the cone of the car: a cardboard tube, 4.2 cm of radius, 42 cm tall -->
+<!-- the cone of the car: a tube, 1.05 cm of radius, 42 cm tall -->
 <sdf version="1.9">
   <model name="cone">
     <static>true</static>
     <link name="link">
       <pose>0 0 0.21 0 0 0</pose>
-      <collision name="c"><geometry><cylinder><radius>0.042</radius><length>0.42</length></cylinder></geometry></collision>
+      <collision name="c"><geometry><cylinder><radius>0.0105</radius><length>0.42</length></cylinder></geometry></collision>
       <visual name="v">
-        <geometry><cylinder><radius>0.042</radius><length>0.42</length></cylinder></geometry>
+        <geometry><cylinder><radius>0.0105</radius><length>0.42</length></cylinder></geometry>
         <material><ambient>1 0.4 0 1</ambient><diffuse>1 0.4 0 1</diffuse></material>
       </visual>
     </link>
