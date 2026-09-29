@@ -46,6 +46,7 @@ FIELDS = {
     '/nmpc/solve_time': lambda m: {'ms': m.data},
     '/drift/state': lambda m: dict(zip(['s', 'n', 'e_psi', 'vx', 'vy', 'r', 'd', 'u', 'd_cmd', 'u_cmd'], m.data)),
     '/drift/mu': lambda m: {'mu': m.data},
+    '/handbrake/state': lambda m: dict(zip(['phase', 'heading', 'r', 'u', 'steer', 'vx', 'vy'], m.data)),
 }
 
 
