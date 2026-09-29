@@ -26,14 +26,16 @@
 // before the cone is abeam, full lock and full throttle until the car spins (the donut of Phase 5),
 // then the drift NMPC for hold seconds, then zero commands. Seen from the rear axle at distance rho
 // and angle atan2(x, y), the cone gives the offset to the circle n = radius - rho and the heading
-// error. vx, vy and the steering angle come from the previous solve (the wheels no longer tell the
-// ground speed), the yaw rate from the gyro (EKF).
+// error. vx and vy come from the previous solve (the wheels no longer tell the ground speed),
+// corrected at each scan by how the cone moved since the last one; the steering angle from the
+// previous solve, the yaw rate from the gyro (EKF).
 
 constexpr double CONE_WINDOW = 0.15;   // m around where the cone should be
 constexpr double CONE_RADIUS = 0.042;  // m, the cardboard tube used as the cone
 constexpr double CONE_TIMEOUT = 0.5;   // s without the cone: stop
 constexpr double LOOKAHEAD = 0.4;      // m, pure pursuit in the run-up
 constexpr double HANDOVER = 0.10;      // m before the cone is abeam: the steering lag, 0.17 s
+constexpr double VEL_GAIN = 0.5;       // share of the difference to the velocity from the cone
 // the entry: on the car only a step to full torque at full lock breaks the rear loose (the model
 // lets it go with less), a speed above what the motor reaches saturates the speed loop
 constexpr double KICK_SPEED = 1.5;     // m/s
@@ -56,7 +58,7 @@ double interp(double x, const std::vector<double> & xs, const std::vector<double
 struct Estimate
 {
   rclcpp::Time t;
-  double cx, cy, psi;
+  double cx, cy, psi, vx, vy;
 };
 
 class DriftNode : public rclcpp::Node
@@ -155,20 +157,27 @@ private:
     // where the cone should be when the lidar looked at it, in the lidar frame
     const auto s0 = at(stamp);
     const auto p = at(when(std::atan2(s0->cy, s0->cx - lidar_x_)));
-    const double px = p->cx - lidar_x_, py = p->cy;
-    double sx = 0, sy = 0;
+    // the points there, then again around where they are: a window off the cone would cut it and
+    // pull the centre towards the prediction
+    double px = p->cx - lidar_x_, py = p->cy, sx = 0, sy = 0;
     int count = 0;
-    for (size_t i = 0; i < m.ranges.size(); i++) {
-      const double a = m.angle_min + i * m.angle_increment;
-      const double x = m.ranges[i] * std::cos(a), y = m.ranges[i] * std::sin(a);
-      if (std::isfinite(m.ranges[i]) && std::hypot(x - px, y - py) < CONE_WINDOW) {
-        sx += x;
-        sy += y;
-        count++;
+    for (const double window : {CONE_WINDOW, 2 * CONE_RADIUS}) {
+      sx = sy = 0;
+      count = 0;
+      for (size_t i = 0; i < m.ranges.size(); i++) {
+        const double a = m.angle_min + i * m.angle_increment;
+        const double x = m.ranges[i] * std::cos(a), y = m.ranges[i] * std::sin(a);
+        if (std::isfinite(m.ranges[i]) && std::hypot(x - px, y - py) < window) {
+          sx += x;
+          sy += y;
+          count++;
+        }
       }
-    }
-    if (count < 2) {
-      return;
+      if (count < 2) {
+        return;
+      }
+      px = sx / count;
+      py = sy / count;
     }
     // the rays see the near side of the cone, evenly spaced across it: its centre is pi/4 radius
     // further along the ray
@@ -190,6 +199,27 @@ private:
     }
     cx_ = history_.back().cx;
     cy_ = history_.back().cy;
+
+    // the velocity of the rear axle: the cone stands still, so where it moved in the car frame
+    // since the last scan, turned back by the yaw between, is where the car went
+    const double dt = (seen - last_cone_).seconds(), turn = psi - last_psi_;
+    if (scans_ > 0 && dt > 0.05 && dt < 0.4) {
+      const double mx = last_cx_ - (std::cos(turn) * cx - std::sin(turn) * cy);
+      const double my = last_cy_ - (std::sin(turn) * cx + std::cos(turn) * cy);
+      // per second, in the frame half-way between the scans; vy at the CG
+      cone_vx_ = (std::cos(turn / 2) * mx + std::sin(turn / 2) * my) / dt;
+      cone_vy_ = (-std::sin(turn / 2) * mx + std::cos(turn / 2) * my) / dt + lr_ * r_;
+      cone_v_time_ = last_cone_ + rclcpp::Duration::from_seconds(dt / 2);
+      if (drifting_ && cone_v_time_ > drift_start_) {
+        // against the estimate at that time, as the position
+        const auto m = at(cone_v_time_);
+        vx_ += VEL_GAIN * (cone_vx_ - m->vx);
+        vy_ += VEL_GAIN * (cone_vy_ - m->vy);
+      }
+    }
+    last_cx_ = cx;
+    last_cy_ = cy;
+    last_psi_ = psi;
     last_cone_ = seen;
     scans_++;
   }
@@ -246,19 +276,27 @@ private:
       const double dx = cone_x_ - tf.transform.translation.x, dy = cone_y_ - tf.transform.translation.y;
       cx_ = std::cos(yaw) * dx + std::sin(yaw) * dy;
       cy_ = -std::sin(yaw) * dx + std::cos(yaw) * dy;
-      history_.push_back({now, cx_, cy_, psi_});
+      history_.push_back({now, cx_, cy_, psi_, vx_, vy_});
       pub_drive_->publish(ackermann_msgs::msg::AckermannDrive());
       return;
     }
     // the car moved since the last step: the cone goes back by the rear axle velocity and turns
-    // against the yaw rate. In the run-up the tires grip
+    // against the yaw rate. In the run-up the tires grip, in the entry the wheels spin: the
+    // velocity from the cone
     const double dt = (now - history_.back().t).seconds();
-    const double vx = drifting_ ? vx_ : vx_ekf_, vy = drifting_ ? vy_ - lr_ * r_ : 0.0;
+    double vx = vx_ekf_, vy = 0.0;
+    if (drifting_) {
+      vx = vx_;
+      vy = vy_ - lr_ * r_;
+    } else if (kicking_) {
+      vx = cone_vx_;
+      vy = cone_vy_ - lr_ * r_;
+    }
     const double x = cx_ - vx * dt, y = cy_ - vy * dt, turn = r_ * dt;
     cx_ = std::cos(turn) * x + std::sin(turn) * y;
     cy_ = -std::sin(turn) * x + std::cos(turn) * y;
     psi_ += turn;
-    history_.push_back({now, cx_, cy_, psi_});
+    history_.push_back({now, cx_, cy_, psi_, vx_, vy_});
     if (history_.size() > 25) {
       history_.pop_front();
     }
@@ -297,8 +335,10 @@ private:
       }
       drifting_ = true;
       drift_start_ = now;
-      vx_ = donut_vx_;
-      vy_ = donut_vy_;
+      // the car as the cone saw it last, else the donut of the model
+      const bool fresh = scans_ > 1 && (now - cone_v_time_).seconds() < 0.3;
+      vx_ = fresh ? cone_vx_ : donut_vx_;
+      vy_ = fresh ? cone_vy_ : donut_vy_;
       d_ = d_cmd_ = full_lock_;
       u_cmd_ = v_max_;
     }
@@ -365,9 +405,12 @@ private:
   double vx_ekf_ = 0, r_ = 0, u_ = 0, vx_ = 0, vy_ = 0, d_ = 0;
   double d_cmd_ = 0, u_cmd_ = 0;
   double cx_ = 0, cy_ = 0, psi_ = 0;    // the cone from the rear axle, the yaw since the start
+  double last_cx_ = 0, last_cy_ = 0, last_psi_ = 0;    // where the last scan saw the cone
+  double cone_vx_ = 0, cone_vy_ = 0;   // the velocity from the last two scans
+  rclcpp::Time cone_v_time_{0, 0, RCL_ROS_TIME};
   std::deque<Estimate> history_;       // the last 0.5 s of them
   double lidar_x_ = NAN;
-  rclcpp::Time last_cone_;
+  rclcpp::Time last_cone_{0, 0, RCL_ROS_TIME};
   int scans_ = 0;
   bool launched_ = false, kicking_ = false, drifting_ = false, solved_ = false;
   rclcpp::Time kick_start_, drift_start_;
