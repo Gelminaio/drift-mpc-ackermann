@@ -22,7 +22,8 @@
 // vx and vy carried by the model from brake_vx, brake_vy (the wheels are locked).
 // With box, the straight ends at a box on the left instead of after straight s: at rest its side is the
 // nearest line of points left of the path, and the turn starts when the far corner of that side is
-// turn_at m from the rear axle, from the scans (the launch slips 20-30%, the wheels over-read).
+// turn_at m from the rear axle, from the scans (the launch slips 20-30%, the wheels over-read). Not
+// before T_STEADY: turning while the car still speeds up, the turn is shorter and less repeatable.
 
 constexpr double DT_MODEL = 0.005;   // s, model steps in the prediction
 constexpr double HORIZON = 1.5;      // s, longest prediction
@@ -37,6 +38,10 @@ constexpr double SLIDE_STEER_MIN = -0.15;
 constexpr double FACE_BAND = 0.04;   // m around the side of the box
 constexpr double GAP = 0.05;         // m between points of the side at rest
 constexpr double BOX_TIMEOUT = 0.5;  // s without the box in the straight: stop
+// s from the start: full speed. Turning at 1.44-1.52 s the car went 0.28-0.37 m on from the turn to
+// the stop, at 1.62-1.64 s 0.60 and 0.595 (hbb runs, 2026-09-30)
+constexpr double T_STEADY = 1.6;
+constexpr double LATE = 0.05;        // m past turn_at at T_STEADY: the box is too close, stop
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -92,7 +97,9 @@ public:
     brake_vx_ = declare_parameter("brake_vx", 0.82);
     brake_vy_ = declare_parameter("brake_vy", -0.10);
     box_ = declare_parameter("box", false);
-    turn_at_ = declare_parameter("turn_at", -0.05);  // m, far corner of the box ahead of the rear axle
+    // m, far corner of the box ahead of the rear axle: 0.60 m from the turn to the stop, the nose
+    // stops 0.38 - turn_at m past the corner
+    turn_at_ = declare_parameter("turn_at", 0.26);
 
     pub_drive_ = create_publisher<ackermann_msgs::msg::AckermannDrive>("/drive", 10);
     pub_arm_ = create_publisher<std_msgs::msg::Bool>("/arm", 10);
@@ -124,12 +131,16 @@ private:
         return;    // the transform comes a moment after the start
       }
     }
-    std::vector<double> xs, ys, as;    // points from the rear axle, and their lidar angles
+    // points from the rear axle along the start heading (the launch veers 0-5 deg: seen from the car
+    // the side of the box would tilt out of FACE_BAND), and their lidar angles
+    const double c = std::cos(heading_), s = std::sin(heading_);
+    std::vector<double> xs, ys, as;
     for (size_t i = 0; i < m.ranges.size(); i++) {
       if (std::isfinite(m.ranges[i])) {
         const double a = m.angle_min + i * m.angle_increment;
-        xs.push_back(m.ranges[i] * std::cos(a) + lidar_x_);
-        ys.push_back(m.ranges[i] * std::sin(a));
+        const double x = m.ranges[i] * std::cos(a) + lidar_x_, y = m.ranges[i] * std::sin(a);
+        xs.push_back(x * c - y * s);
+        ys.push_back(x * s + y * c);
         as.push_back(a);
       }
     }
@@ -173,11 +184,19 @@ private:
       }
     } else {
       const double expected = far_x_ - u_ * (rclcpp::Time(m.header.stamp) - far_t_).seconds();
+      std::vector<double> on_side;
       for (const size_t i : side) {
         if (xs[i] > expected - 0.5 && xs[i] < expected + 0.15) {
           far = i;
+          on_side.push_back(ys[i]);
         }
       }
+      if (far < 0) {
+        return;
+      }
+      // the car drifts sideways a few cm: the side where it is now
+      std::sort(on_side.begin(), on_side.end());
+      side_y_ = on_side[on_side.size() / 2];
     }
     if (far < 0) {
       return;
@@ -322,7 +341,10 @@ private:
           if (since > BOX_TIMEOUT) {
             RCLCPP_ERROR(get_logger(), "box not seen for %.2f s: stop", since);
             next(Phase::DONE, now);
-          } else if (t > T_RAMP && far_now_ <= turn_at_) {
+          } else if (t > T_STEADY && far_now_ < turn_at_ - LATE) {
+            RCLCPP_ERROR(get_logger(), "box too close: the corner %.3f m ahead at full speed, stop", far_now_);
+            next(Phase::DONE, now);
+          } else if (t > T_STEADY && far_now_ <= turn_at_) {
             RCLCPP_INFO(get_logger(), "turn with the far corner %.3f m ahead, %.2f s after the start", far_now_, t);
             next(Phase::TURN, now);
           }

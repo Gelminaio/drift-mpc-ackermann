@@ -29,7 +29,7 @@ def generate_launch_description():
         DeclareLaunchArgument('target', default_value='180.0'),         # deg, where it should stop
         DeclareLaunchArgument('locked_friction', default_value='1.5'),  # rear friction the node assumes
         DeclareLaunchArgument('box', default_value='false'),            # turn from the box on the left
-        DeclareLaunchArgument('turn_at', default_value='-0.05'),        # m, its far corner from the rear axle
+        DeclareLaunchArgument('turn_at', default_value='0.26'),         # m, its far corner from the rear axle
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         handbrake,
