@@ -12,11 +12,14 @@ from std_msgs.msg import Bool
 # handbrake turn: straight up to speed, full lock at speed, rear wheels locked (speed 0, the motor
 # driver brakes) once the heading from the gyro reaches brake_at, then stopped.
 # usage: handbrake.py <speed [m/s]> <straight [s]> <brake_at [deg]> [steer, default 0.52] [steer braked, default steer]
+#        [speed at full lock, default speed]
 SPEED, STRAIGHT, BRAKE_AT = float(sys.argv[1]), float(sys.argv[2]), np.radians(float(sys.argv[3]))
 STEER = float(sys.argv[4]) if len(sys.argv) > 4 else 0.52
 STEER_BRAKED = float(sys.argv[5]) if len(sys.argv) > 5 else STEER
+SPEED_TURN = float(sys.argv[6]) if len(sys.argv) > 6 else SPEED
 T_RAMP = 1.0    # s from rest to SPEED
 T_BRAKE = 1.0   # s braked before disarming
+T_TURN = 2.5    # s at full lock at most (on the stand the heading does not grow)
 
 rclpy.init()
 node = rclpy.create_node('handbrake')
@@ -50,8 +53,9 @@ t0 = time.time()
 while time.time() - t0 < T_RAMP + STRAIGHT:        # up to speed, straight
     send(SPEED * min(1.0, (time.time() - t0) / T_RAMP), 0.0)
 n0, heading = len(gz), 0.0
-while heading < BRAKE_AT:                          # full lock at speed
-    send(SPEED, STEER)
+t0 = time.time()
+while heading < BRAKE_AT and time.time() - t0 < T_TURN:   # full lock at speed
+    send(SPEED_TURN, STEER)
     new = gz[n0 - 1:]
     heading = sum((b[0] - a[0]) * (b[1] - bias) for a, b in zip(new, new[1:]))
 at_brake = heading
