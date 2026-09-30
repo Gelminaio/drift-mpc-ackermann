@@ -23,14 +23,15 @@ def rear_wheel(vx, vy, u, k=1.0):
     return -f * sx / s, -f * sy / s
 
 
-def forces(x, u, k=1.0):
+def forces(x, u, k=1.0, rear=1.0):
     # body forces and yaw moment at the CG; x = vx, vy, r, steering angle; u = rear wheel speed.
-    # Floor friction k times the tiles, as sim_car: the peak scales, the stiffness does not
+    # Floor friction k times the tiles, as sim_car: the peak scales, the stiffness does not.
+    # rear: the rear alone scaled on top (a locked rear slides with more, handbrake.ipynb)
     vx, vy, r, d = x
     vx = max(vx, 0.05)
     fyf = k * MU_F * NF * np.sin(C * np.arctan(B_F / k * (d - np.arctan((vy + LF * r) / vx))))
-    fxl, fyl = rear_wheel(vx - T / 2 * r, vy - LR * r, u, k)
-    fxr, fyr = rear_wheel(vx + T / 2 * r, vy - LR * r, u, k)
+    fxl, fyl = rear_wheel(vx - T / 2 * r, vy - LR * r, u, k * rear)
+    fxr, fyr = rear_wheel(vx + T / 2 * r, vy - LR * r, u, k * rear)
     fx = fxl + fxr - fyf * np.sin(d)
     fy = fyf * np.cos(d) + fyl + fyr
     mz = LF * fyf * np.cos(d) - LR * (fyl + fyr) + T / 2 * (fxr - fxl)
