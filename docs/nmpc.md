@@ -122,6 +122,27 @@ lets go only on a torque step (full lock, full throttle); open loop the car keep
 any correction, less steering or less wheel speed. The drift of the table (13-14 deg, 0.27-0.28 m)
 is the unstable middle state of the model: the NMPC holds it in Gazebo, not on the car.
 
+## Handbrake
+
+`src/handbrake_node.cpp` (`notebooks/handbrake.ipynb`): straight from the start mark, full lock,
+and at `brake_at` (gyro heading) speed 0: the motor driver locks the rear wheels in 0.35-0.4 s and
+the car slides. In the slide, every 20 ms, the Phase 5 model is run to the stop for a steering held
+constant, and bisection finds the one that stops at `target`. The locked rear slides with 1.5 times
+the friction of a spinning one (0.41 against 0.28). Steering between full lock and -0.15:
+countersteered further the car swings back 5-12 deg, which the model does not.
+
+    ros2 launch ackermann_bringup handbrake.launch.py [brake_at:=145 target:=180] [use_sim_time:=true]
+
+On the tiles, target 180 deg:
+
+| | runs | stop [deg] |
+|---|---|---|
+| open loop, brake at 136 deg, full lock in the slide | 6 | 177-197 |
+| node, brake at 145 deg | 6 | 179.9-183.1 |
+
+Between two boxes 3 out of 3: 12-24 cm from the nose to the box ahead, 4-6 cm from the side to the
+one beside. The stop position is not controlled: 12 cm along the car between runs.
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the
