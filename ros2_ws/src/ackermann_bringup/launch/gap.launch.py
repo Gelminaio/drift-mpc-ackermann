@@ -1,0 +1,37 @@
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node, SetParameter
+from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description():
+    description = FindPackageShare('ackermann_description')
+    gap = Node(
+        package='ackermann_nmpc',
+        executable='gap_node',
+        name='gap',
+        output='screen',
+        parameters=[
+            PathJoinSubstitution([description, 'config', 'vehicle_params.yaml']),
+            {name: ParameterValue(LaunchConfiguration(name), value_type=float)
+             for name in ['target', 'kick_ahead', 'kick_left', 'side_in', 'sweep', 'slide_ref']},
+        ],
+    )
+
+    return LaunchDescription([
+        DeclareLaunchArgument('target', default_value='180.0'),        # deg, where it should stop
+        DeclareLaunchArgument('kick_ahead', default_value='0.25'),     # m, stopped car ahead of the kick
+        DeclareLaunchArgument('kick_left', default_value='0.43'),      # m, and left of it
+        DeclareLaunchArgument('side_in', default_value='0.02'),        # m, car side inside the boxes
+        DeclareLaunchArgument('sweep', default_value='0.17'),          # m, tail swung past where it stops
+        DeclareLaunchArgument('slide_ref', default_value='0.2'),       # slide steering the brake assumes
+        DeclareLaunchArgument('use_sim_time', default_value='false'),  # true in the sim
+        SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
+        gap,
+        # the run ends with the node
+        RegisterEventHandler(OnProcessExit(target_action=gap, on_exit=[EmitEvent(event=Shutdown())])),
+    ])
