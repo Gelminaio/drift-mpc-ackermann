@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- box B of the parking: 47.5 cm along the path of the car, 30 across, 30 tall -->
+<sdf version="1.9">
+  <model name="box_b">
+    <static>true</static>
+    <link name="link">
+      <pose>0 0 0.15 0 0 0</pose>
+      <collision name="c"><geometry><box><size>0.475 0.30 0.30</size></box></geometry></collision>
+      <visual name="v">
+        <geometry><box><size>0.475 0.30 0.30</size></box></geometry>
+        <material><ambient>0.8 0.6 0.4 1</ambient><diffuse>0.8 0.6 0.4 1</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

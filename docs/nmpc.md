@@ -122,6 +122,42 @@ lets go only on a torque step (full lock, full throttle); open loop the car keep
 any correction, less steering or less wheel speed. The drift of the table (13-14 deg, 0.27-0.28 m)
 is the unstable middle state of the model: the NMPC holds it in Gazebo, not on the car.
 
+## Handbrake
+
+`src/handbrake_node.cpp` (`notebooks/handbrake.ipynb`, `notebooks/parking.ipynb`). From the start mark:
+straight on the line of the start (pure pursuit, the offset from the wheels and the gyro heading), a
+turn, and at `brake_at` (gyro heading) speed 0: the motor driver locks the rear wheels in 0.35-0.4 s and
+the car slides. In the slide, every 20 ms, the Phase 5 model is run to the stop for a steering held
+constant, and bisection finds the one that stops at `target`. The locked rear slides with 1.5 times the
+friction of a spinning one (0.41 against 0.28); the steering stays between full lock and -0.15
+(countersteered further the car swings back 5-12 deg); the slide is aimed 2.6 deg short, since the car
+turns the last degrees as it stops (182.6 +- 1.5 deg over 11 turns aimed at 180).
+
+The turn is in grip, steering 0.35-0.45 at 1.0 m/s: at full lock and full throttle the rear lets go
+when the floor decides and the stops spread 20 cm sideways.
+
+With `box:=true` the car parks between box A, ahead on the left, and box B beyond it. At rest the side
+of A is the nearest line of points left of the path; in the straight the scans, turned by the gyro
+heading, follow its far corner, and the turn starts when it is `turn_at` (0.17 m) ahead of the rear
+axle, not before 1.6 s from the start (turning while the car still speeds up, the turn is shorter and
+less repeatable). Past A, the side of B is the nearest line further out, and the steering of the turn
+comes from how far out it is (`stop_y`, `stop_steer`: 0.35 to 0.45 moves the stop 20 cm) to stop
+`side_gap` (0.10 m) from it.
+
+    ros2 launch ackermann_bringup handbrake.launch.py box:=true [turn_at:=0.17 side_gap:=0.10] [use_sim_time:=true]
+
+On the tiles, target 180 deg, the stops by the lidar:
+
+| | runs | stop [deg] | stops across [cm] |
+|---|---|---|---|
+| open loop, full lock, brake at 136 deg | 6 | 177-197 | |
+| full lock, turning from box A | 4 | 180.7-186.7 | 20 |
+| grip, on the line of the start | 3 | 180.9-183.2 | 2.3 |
+| grip, from A and B, the same boxes | 3 | 175.9-181.0 | 1.3 |
+
+With B 10 cm further out the car stopped 9.6 cm further out; the nose 6-10 cm from A, the side 9-15 cm
+from B.
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the
