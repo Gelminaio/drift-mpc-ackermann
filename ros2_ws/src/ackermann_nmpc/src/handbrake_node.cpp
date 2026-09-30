@@ -22,7 +22,7 @@
 // vx and vy carried by the model from brake_vx, brake_vy (the wheels are locked).
 // With box, the straight ends at a box on the left instead of after straight s: at rest its side is the
 // nearest line of points left of the path, and the turn starts when the far corner of that side is
-// turn_at m from the rear axle, from the scans (the launch slips 20-30%, the wheels over-read). Not
+// turn_at m from the rear axle, from the scans (the wheels over-read, 4-6% by the turn). Not
 // before T_STEADY: turning while the car still speeds up, the turn is shorter and less repeatable.
 
 constexpr double DT_MODEL = 0.005;   // s, model steps in the prediction
@@ -38,8 +38,8 @@ constexpr double SLIDE_STEER_MIN = -0.15;
 constexpr double FACE_BAND = 0.04;   // m around the side of the box
 constexpr double GAP = 0.05;         // m between points of the side at rest
 constexpr double BOX_TIMEOUT = 0.5;  // s without the box in the straight: stop
-// s from the start: full speed. Turning at 1.44-1.52 s the car went 0.28-0.37 m on from the turn to
-// the stop, at 1.62-1.64 s 0.60 and 0.595 (hbb runs, 2026-09-30)
+// s from the start: full speed. Turning at 1.44-1.52 s the car went 0.22-0.35 m on from the turn to
+// the stop, at 1.62-1.86 s 0.55-0.62 (parking.ipynb)
 constexpr double T_STEADY = 1.6;
 constexpr double LATE = 0.05;        // m past turn_at at T_STEADY: the box is too close, stop
 
@@ -97,8 +97,8 @@ public:
     brake_vx_ = declare_parameter("brake_vx", 0.82);
     brake_vy_ = declare_parameter("brake_vy", -0.10);
     box_ = declare_parameter("box", false);
-    // m, far corner of the box ahead of the rear axle: 0.60 m from the turn to the stop, the nose
-    // stops 0.38 - turn_at m past the corner
+    // m, far corner of the box ahead of the rear axle at the turn: ~0.58 m from the turn to the stop,
+    // the nose ~0.36 - turn_at m past the corner
     turn_at_ = declare_parameter("turn_at", 0.26);
 
     pub_drive_ = create_publisher<ackermann_msgs::msg::AckermannDrive>("/drive", 10);
