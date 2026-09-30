@@ -143,6 +143,16 @@ On the tiles, target 180 deg:
 Between two boxes 3 out of 3: 12-24 cm from the nose to the box ahead, 4-6 cm from the side to the
 one beside. The stop position is not controlled: 12 cm along the car between runs.
 
+With `box:=true` the straight ends at the box on the left (`notebooks/parking.ipynb`). At rest its side
+is the nearest line of points left of the path and its far corner the last point of that side; in the
+straight the scans, turned by the gyro heading, follow the corner, and the turn starts when it is
+`turn_at` (0.26 m) ahead of the rear axle, not before 1.6 s from the start: turning while the car still
+speeds up, it covers 0.22-0.35 m from the turn to the stop, at full speed 0.55-0.62. The box moved 19
+cm, the stop 22 cm, the nose 7.0 and 7.6 cm from it. Sideways the stops spread 0.98-1.18 m: at full
+lock and full throttle the floor decides when the rear lets go in the turn.
+
+    ros2 launch ackermann_bringup handbrake.launch.py box:=true [turn_at:=0.26]
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the
