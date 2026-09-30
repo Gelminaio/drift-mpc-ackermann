@@ -108,9 +108,10 @@ public:
     brake_vx_ = declare_parameter("brake_vx", 0.95);
     brake_vy_ = declare_parameter("brake_vy", 0.0);
     box_ = declare_parameter("box", false);
-    // m, far corner of box A ahead of the rear axle at the turn: in grip ~0.37 m from the turn to the
-    // stop, the nose ~0.15 - turn_at m past the corner
-    turn_at_ = declare_parameter("turn_at", 0.05);
+    // m, far corner of box A ahead of the rear axle at the turn: in grip 0.47-0.51 m from the turn to the
+    // stop (hbf runs), the nose ~0.27 - turn_at m past the corner. The corner must be ~0.25 m past it at
+    // T_STEADY, 1.15 m from the start: box A at least ~1.40 m ahead
+    turn_at_ = declare_parameter("turn_at", 0.17);
     // m left of the line of the start where the rear axle stopped, with each steering of the turn (hbl runs)
     stop_y_ = declare_parameter("stop_y", std::vector<double>{0.94, 1.04, 1.14});
     stop_steer_ = declare_parameter("stop_steer", std::vector<double>{0.45, 0.40, 0.35});

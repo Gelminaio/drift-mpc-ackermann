@@ -30,7 +30,7 @@ def generate_launch_description():
         DeclareLaunchArgument('target', default_value='180.0'),         # deg, where it should stop
         DeclareLaunchArgument('locked_friction', default_value='1.5'),  # rear friction the node assumes
         DeclareLaunchArgument('box', default_value='false'),            # turn from the box on the left
-        DeclareLaunchArgument('turn_at', default_value='0.05'),         # m, its far corner from the rear axle
+        DeclareLaunchArgument('turn_at', default_value='0.17'),         # m, its far corner from the rear axle
         DeclareLaunchArgument('turn_steer', default_value='0.45'),      # steering command in the turn, without box B
         DeclareLaunchArgument('turn_speed', default_value='1.0'),       # m/s command in the turn
         DeclareLaunchArgument('brake_vx', default_value='0.95'),        # m/s, rear axle at the brake, assumed
