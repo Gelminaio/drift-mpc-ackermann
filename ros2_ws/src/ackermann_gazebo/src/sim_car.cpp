@@ -57,7 +57,7 @@ using State = std::array<double, N>;
 struct Params
 {
   double mass, iz, lf, lr, track, wheel_radius, nf, nr;
-  double mu_f, b_f, mu_r, b_r, c, lambda, load_transfer, load_transfer_x, locked, h_cg;
+  double mu_f, b_f, mu_r, b_r, c, lambda, load_transfer, load_transfer_x, locked, locked_y, h_cg;
   double steer_lag, steer_rate, steer_dead, wheel_k, wheel_a, wheel_u, wheel_d, wheel_brake, gyro_lag, gyro_scale;
   std::vector<double> steer_cmd, steer_angle;
 };
@@ -88,19 +88,20 @@ double interp(double x, const std::vector<double> & xs, const std::vector<double
 // small slip does not (brush model), so mu -> mu_scale mu and B -> B / mu_scale.
 
 // one rear wheel at surface speed u under load n: force against its sliding direction, the
-// longitudinal slip weighed down by lambda (1 in the model)
-void rear_wheel(const Params & p, double mu_scale, double n, double vx, double vy, double u, double & fx, double & fy)
+// longitudinal slip weighed down by lambda, the force across the wheel x ky
+void rear_wheel(const Params & p, double mu_scale, double ky, double n, double vx, double vy, double u, double & fx,
+                double & fy)
 {
   const double sx = (vx - u) / std::max(u, 0.1) / p.lambda, sy = vy / std::max(u, 0.1);
   const double s = std::hypot(sx, sy) + 1e-9;
   const double f = mu_scale * p.mu_r * n * std::sin(p.c * std::atan(p.b_r / mu_scale * s));
   fx = -f * sx / s;
-  fy = -f * sy / s;
+  fy = -ky * f * sy / s;
 }
 
 // servo: the wheel angle behind the servo (rate limited) by steer_lag. ax, ay: the acceleration of the
 // last step for the load transfer, longitudinal load_transfer_x of m ax h / L and lateral load_transfer of
-// m ay h / T on the rear axle. Braked: the rear friction x locked
+// m ay h / T on the rear axle. Braked: the rear friction x locked along the wheel, x locked_y across it
 State deriv(const Params & p, double mu_scale, const State & x, double servo, double setpoint, bool braked,
             double ax, double ay)
 {
@@ -109,11 +110,11 @@ State deriv(const Params & p, double mu_scale, const State & x, double servo, do
   const double dn = p.load_transfer * p.mass * ay * p.h_cg / p.track;
   const double alpha_f = d - std::atan((vy + p.lf * r) / vx);
   const double fyf = mu_scale * p.mu_f * (p.nf - dn_x) * std::sin(p.c * std::atan(p.b_f / mu_scale * alpha_f));
-  const double k = braked ? mu_scale * p.locked : mu_scale;
+  const double k = braked ? mu_scale * p.locked : mu_scale, ky = braked ? p.locked_y / p.locked : 1.0;
   const double nr = p.nr + dn_x;
   double fxl, fyl, fxr, fyr;
-  rear_wheel(p, k, std::max(nr / 2 - dn, 0.0), vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
-  rear_wheel(p, k, std::max(nr / 2 + dn, 0.0), vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
+  rear_wheel(p, k, ky, std::max(nr / 2 - dn, 0.0), vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
+  rear_wheel(p, k, ky, std::max(nr / 2 + dn, 0.0), vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
   const double fx = fxl + fxr - fyf * std::sin(d);
   const double fy = fyf * std::cos(d) + fyl + fyr;
   const double mz = p.lf * fyf * std::cos(d) - p.lr * (fyl + fyr) + p.track / 2 * (fxr - fxl);
@@ -173,6 +174,7 @@ public:
     p_.load_transfer = y["fit_lt_y"].as<double>();
     p_.load_transfer_x = y["fit_lt_x"].as<double>();
     p_.locked = y["fit_locked"].as<double>();
+    p_.locked_y = y["fit_locked_y"].as<double>();
     p_.h_cg = y["h_cg"].as<double>();
     p_.steer_lag = y["fit_steer_lag"].as<double>();
     p_.steer_rate = y["steer_rate_max"].as<double>();
