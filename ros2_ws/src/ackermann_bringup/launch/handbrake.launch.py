@@ -18,7 +18,8 @@ def generate_launch_description():
         parameters=[
             PathJoinSubstitution([description, 'config', 'vehicle_params.yaml']),
             {name: ParameterValue(LaunchConfiguration(name), value_type=float)
-             for name in ['straight', 'brake_at', 'target', 'locked_friction', 'turn_at']},
+             for name in ['straight', 'brake_at', 'target', 'locked_friction', 'turn_at', 'turn_steer', 'turn_speed',
+                          'brake_vx', 'brake_vy']},
             {'box': ParameterValue(LaunchConfiguration('box'), value_type=bool)},
         ],
     )
@@ -30,6 +31,10 @@ def generate_launch_description():
         DeclareLaunchArgument('locked_friction', default_value='1.5'),  # rear friction the node assumes
         DeclareLaunchArgument('box', default_value='false'),            # turn from the box on the left
         DeclareLaunchArgument('turn_at', default_value='0.26'),         # m, its far corner from the rear axle
+        DeclareLaunchArgument('turn_steer', default_value='0.52'),      # steering command in the turn
+        DeclareLaunchArgument('turn_speed', default_value='1.5'),       # m/s command in the turn
+        DeclareLaunchArgument('brake_vx', default_value='0.82'),        # m/s, rear axle at the brake, assumed
+        DeclareLaunchArgument('brake_vy', default_value='-0.10'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         handbrake,

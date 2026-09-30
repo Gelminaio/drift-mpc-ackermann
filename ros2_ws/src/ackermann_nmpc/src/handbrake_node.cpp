@@ -88,6 +88,9 @@ public:
     nr_ = m_ * g * lf_ / l;
     // the run
     speed_ = declare_parameter("speed", 1.5);        // m/s command, above what the motor reaches
+    // the turn: full lock at full throttle by default
+    turn_steer_ = declare_parameter("turn_steer", steer_cmd_.back());
+    turn_speed_ = declare_parameter("turn_speed", speed_);
     straight_ = declare_parameter("straight", 0.5);  // s at speed before the turn
     brake_at_ = declare_parameter("brake_at", 145.0) * M_PI / 180;
     target_ = declare_parameter("target", 180.0) * M_PI / 180;
@@ -353,13 +356,13 @@ private:
         }
         break;
       case Phase::TURN:
-        send(speed_, steer_cmd_.back());
+        send(turn_speed_, turn_steer_);
         if (t > T_TURN) {
           RCLCPP_ERROR(get_logger(), "heading %.0f deg after %.1f s at full lock: stop", heading_ * 180 / M_PI, t);
           next(Phase::DONE, now);
         } else if (heading_ >= brake_at_) {
           const double vy = brake_vy_ + lr_ * r_;
-          model_ = {brake_vx_, vy, r_, interp(steer_cmd_.back(), steer_cmd_, steer_angle_)};
+          model_ = {brake_vx_, vy, r_, interp(turn_steer_, steer_cmd_, steer_angle_)};
           heading_brake_ = heading_;
           next(Phase::SLIDE, now);
         }
@@ -405,7 +408,7 @@ private:
   double wheel_radius_, m_, iz_, lf_, lr_, track_, steer_lag_, brake_lag_;
   double mu_f_, b_f_, mu_r_, b_r_, c_, nf_, nr_;
   std::vector<double> steer_cmd_, steer_angle_;
-  double speed_, straight_, brake_at_, target_, locked_friction_, brake_vx_, brake_vy_, turn_at_;
+  double speed_, turn_steer_, turn_speed_, straight_, brake_at_, target_, locked_friction_, brake_vx_, brake_vy_, turn_at_;
   bool box_;
 
   Phase phase_ = Phase::WAIT;
