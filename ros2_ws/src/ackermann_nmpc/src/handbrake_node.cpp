@@ -115,8 +115,9 @@ public:
     // stop (hbf runs), the nose ~0.27 - turn_at m past the corner. The corner must be ~0.25 m past it at
     // T_STEADY, 1.15 m from the start: box A at least ~1.40 m ahead
     turn_at_ = declare_parameter("turn_at", 0.17);
-    // m left of the line of the start where the rear axle stopped, with each steering of the turn (hbl runs)
-    stop_y_ = declare_parameter("stop_y", std::vector<double>{0.94, 1.04, 1.14});
+    // m left of the line of the start where the rear axle stopped, with each steering of the turn: the
+    // timed runs (hbl, 0.94 / 1.04 / 1.14), 2.6 cm less as the runs turning from the box (hbf)
+    stop_y_ = declare_parameter("stop_y", std::vector<double>{0.917, 1.015, 1.114});
     stop_steer_ = declare_parameter("stop_steer", std::vector<double>{0.45, 0.40, 0.35});
     side_gap_ = declare_parameter("side_gap", 0.10);  // m from the right side of the car to box B
 
