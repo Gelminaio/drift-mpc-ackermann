@@ -14,7 +14,7 @@ A 1:10 scale autonomous vehicle that drives at the limit of tire adhesion — co
 
 ## Abstract
 
-This project investigates aggressive trajectory tracking at the limit of tire adhesion for small-scale autonomous ground vehicles. A Nonlinear MPC controller, formulated on an identified dynamic bicycle model with a nonlinear (Pacejka-type) tire model, regulates trajectory tracking while operating in the saturated-friction regime, enabling controlled oversteer (drift) rather than avoiding it. The road–tire friction coefficient is estimated online and enters the model, so the maneuvers that follow are planned for the grip of the floor it is on. The full stack runs distributed over a ROS 2 Jazzy network spanning an ESP32 real-time controller, a Raspberry Pi 4 sensor bridge, and a base-station compute host. The final demonstration is autonomous drift parking: a handbrake turn and a sideways slide into a gap between two boxes, steered by the model while the rear wheels slide locked, on two surfaces, with a Gazebo digital twin of the car alongside.
+This project investigates aggressive trajectory tracking at the limit of tire adhesion for small-scale autonomous ground vehicles. A Nonlinear MPC controller, formulated on an identified dynamic bicycle model with a nonlinear (Pacejka-type) tire model, regulates trajectory tracking while operating in the saturated-friction regime, enabling controlled oversteer (drift) rather than avoiding it. The road–tire friction coefficient is estimated online and enters the model, so the maneuvers that follow are planned for the grip of the floor it is on. The full stack runs distributed over a ROS 2 Jazzy network spanning an ESP32 real-time controller, a Raspberry Pi 4 sensor bridge, and a base-station compute host. The final demonstration is an autonomous gymkhana in one take: a slalom at the limit of adhesion, a drift, and a handbrake turn that parks the car between two boxes found with the lidar, with a Gazebo digital twin of the car alongside.
 
 ---
 
@@ -160,8 +160,8 @@ The project is structured in 12 incremental phases, from physical hardware assem
 - [x] **Phase 8** — Simulation & digital twin (friction randomization)
 - [x] **Phase 9** — Dynamic NMPC at the limit of adhesion (acados)
 - [x] **Phase 10** — Drift around a target, friction estimated from the drift (Gazebo; on the car the drift does not hold)
-- [ ] **Phase 11** — Drift parking: handbrake turn and slide steered by the model, on two surfaces
-- [ ] **Phase 12** — One-take autonomous run, onboard HUD video, technical report
+- [x] **Phase 11** — Drift parking between two boxes: handbrake turn steered by the model, placed from the lidar
+- [ ] **Phase 12** — Autonomous gymkhana in one take: slalom, drift, handbrake parking; onboard HUD video, technical report
 
 Track progress via [GitHub Milestones](../../milestones).
 
@@ -267,11 +267,28 @@ overhead phone video tracking two markers on the car, plus IMU and encoders.
   of the model. Phase 11 moves to the slide with the rear wheels locked.
 - [`notebooks/drift.ipynb`](notebooks/drift.ipynb), [`docs/nmpc.md`](docs/nmpc.md).
 
+### Phase 11 — Drift parking
+
+<p align="center">
+  <img src="media/parking.png" alt="The car stopped between two boxes, from above, as the lidar saw them" width="90%"/>
+</p>
+
+- A handbrake turn: straight, a turn, then speed 0 and the motor driver locks the rear wheels. In the
+  slide the model, run to the stop every 20 ms, picks the steering that stops the car at the heading
+  asked; a locked rear slides with 1.5 times the friction of a spinning one. With the same commands
+  open loop the car stopped anywhere from 177 to 197 deg; steered, 181.6 +- 2.2 deg over 28 runs.
+- The boxes from the lidar: the corner of box A sets where the car turns, box B how far out, through
+  the steering of the turn. Box A 19 cm further, the stop 22 cm further; box B 10 cm further out, the
+  stop 9.6 cm further out.
+- The turn in grip, the straight held on the line of the start: the same boxes, the stops within 4 cm
+  along the path and 1.3 cm across. At full lock and full throttle the floor decides when the rear lets
+  go and the stops spread 20 cm across.
+- [`notebooks/handbrake.ipynb`](notebooks/handbrake.ipynb), [`notebooks/parking.ipynb`](notebooks/parking.ipynb), [`docs/nmpc.md`](docs/nmpc.md).
+
 > 📌 **TODO**: populate with figures, plots, and demo videos as phases complete.
 
 Planned deliverables include:
-- Autonomous drift parking in one take: a handbrake turn and a sideways slide into a gap between boxes, steered by the model with the rear wheels locked. Overhead and onboard view, the plan drawn on the onboard camera
-- The grip of the floor measured by the car and used to plan the slide: the same run on two surfaces, against the friction held fixed
+- An autonomous gymkhana in one take: a slalom at the limit, a drift, the handbrake parking between two boxes. Overhead and onboard view, the plan drawn on the onboard camera
 
 ---
 
