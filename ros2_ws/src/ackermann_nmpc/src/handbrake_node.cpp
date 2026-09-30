@@ -42,6 +42,9 @@ constexpr double BOX_TIMEOUT = 0.5;  // s without the box in the straight: stop
 // the stop, at 1.62-1.86 s 0.55-0.62 (parking.ipynb)
 constexpr double T_STEADY = 1.6;
 constexpr double LATE = 0.05;        // m past turn_at at T_STEADY: the box is too close, stop
+// m, pure pursuit on the line of the start in the straight: the launch veered 0.7-1.8 deg by the turn,
+// the stop moved ~4 cm sideways per deg (hbg runs)
+constexpr double LOOKAHEAD = 0.4;
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -332,11 +335,16 @@ private:
         send(0.0, 0.0);
         if (t > T_ARM) {
           heading_ = 0.0;
+          offset_ = 0.0;
           next(Phase::STRAIGHT, now);
         }
         break;
-      case Phase::STRAIGHT:
-        send(speed_ * std::min(1.0, t / T_RAMP), 0.0);
+      case Phase::STRAIGHT: {
+        // on the line of the start: the offset from the wheels and the gyro heading
+        offset_ += u_ * std::sin(heading_) * 0.02;
+        const double ty = -std::sin(heading_) * LOOKAHEAD - std::cos(heading_) * offset_;
+        const double d = std::atan(2 * (lf_ + lr_) * ty / (LOOKAHEAD * LOOKAHEAD + offset_ * offset_));
+        send(speed_ * std::min(1.0, t / T_RAMP), interp(d, steer_angle_, steer_cmd_));
         if (box_) {
           // the corner carried from the last scan with the wheels
           const double since = (now - far_t_).seconds();
@@ -355,6 +363,7 @@ private:
           next(Phase::TURN, now);
         }
         break;
+      }
       case Phase::TURN:
         send(turn_speed_, turn_steer_);
         if (t > T_TURN) {
@@ -414,7 +423,7 @@ private:
   Phase phase_ = Phase::WAIT;
   rclcpp::Time t_phase_{0, 0, RCL_ROS_TIME}, last_imu_{0, 0, RCL_ROS_TIME};
   std::vector<double> bias_samples_;
-  double bias_ = 0.0, heading_ = 0.0, heading_brake_ = 0.0, r_ = 0.0, u_ = 0.0, steer_ = 0.52;
+  double bias_ = 0.0, heading_ = 0.0, offset_ = 0.0, heading_brake_ = 0.0, r_ = 0.0, u_ = 0.0, steer_ = 0.52;
   State model_{0, 0, 0, 0};
   double lidar_x_ = NAN, side_y_ = NAN, far_x_ = NAN, far_now_ = NAN;
   rclcpp::Time far_t_{0, 0, RCL_ROS_TIME};
