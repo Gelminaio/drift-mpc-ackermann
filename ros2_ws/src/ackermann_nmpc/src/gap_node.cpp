@@ -35,7 +35,6 @@ constexpr double T_KICK = 2.0;       // s kicking without braking: stop
 constexpr double T_SLIDE = 1.5;      // s from the brake to the end
 constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
 constexpr double SLIDE_STEER_MIN = -0.15;   // countersteered further the car swings back (hbn runs)
-constexpr double GAIN_R = 0.5;       // share of the gyro's yaw rate error taken each step
 constexpr double LOOKAHEAD = 0.4;    // m, pure pursuit on the line of the approach
 constexpr double WHEEL_SLIP = 0.97;  // car over wheels at the launch (0.94-1.00, identification.ipynb)
 constexpr double HALF_WIDTH = 0.10;  // m, the car to the outside of the wheels
@@ -100,6 +99,7 @@ public:
     b_r_ = declare_parameter<double>("fit_b_r");
     lambda_ = declare_parameter<double>("fit_lambda");
     locked_ = declare_parameter<double>("fit_locked");
+    locked_y_ = declare_parameter<double>("fit_locked_y");
     lt_x_ = declare_parameter<double>("fit_lt_x");
     lt_y_ = declare_parameter<double>("fit_lt_y");
     wheel_brake_ = declare_parameter<double>("wheel_brake");
@@ -228,28 +228,28 @@ private:
     joints_t_ = t;
   }
 
-  // one rear wheel at surface speed u under load n: force against its sliding direction
-  void rear_wheel(double vx, double vy, double u, double n, double k, double & fx, double & fy) const
+  // one rear wheel at surface speed u under load n: force against its sliding direction; braked, the
+  // friction x locked along the wheel and x locked_y across it
+  void rear_wheel(double vx, double vy, double u, double n, bool braked, double & fx, double & fy) const
   {
+    const double k = braked ? locked_ : 1.0, ky = braked ? locked_y_ / locked_ : 1.0;
     const double sx = (vx - u) / std::max(u, 0.1) / lambda_, sy = vy / std::max(u, 0.1);
     const double s = std::hypot(sx, sy) + 1e-9;
     const double f = k * mu_r_ * std::max(n, 0.0) * std::sin(c_ * std::atan(b_r_ / k * s));
     fx = -f * sx / s;
-    fy = -f * sy / s;
+    fy = -ky * f * sy / s;
   }
 
-  // the refit: load transfer from the last step's acceleration (lt_x, lt_y of the rigid car's), rear
-  // friction x locked while braked
+  // the refit: load transfer from the last step's acceleration (lt_x, lt_y of the rigid car's)
   void step(State & x, double u, bool braked, double d_cmd, double h) const
   {
     const double vx = std::max(x.vx, 0.05), l = lf_ + lr_;
     const double dn_x = lt_x_ * m_ * x.ax * h_ / l, dn = lt_y_ * m_ * x.ay * h_ / track_;
     const double nf = nf_ - dn_x, nr = nr_ + dn_x;
     const double fyf = mu_f_ * nf * std::sin(c_ * std::atan(b_f_ * (x.d - std::atan((x.vy + lf_ * x.r) / vx))));
-    const double k = braked ? locked_ : 1.0;
     double fxl, fyl, fxr, fyr;
-    rear_wheel(vx - track_ / 2 * x.r, x.vy - lr_ * x.r, u, nr / 2 - dn, k, fxl, fyl);
-    rear_wheel(vx + track_ / 2 * x.r, x.vy - lr_ * x.r, u, nr / 2 + dn, k, fxr, fyr);
+    rear_wheel(vx - track_ / 2 * x.r, x.vy - lr_ * x.r, u, nr / 2 - dn, braked, fxl, fyl);
+    rear_wheel(vx + track_ / 2 * x.r, x.vy - lr_ * x.r, u, nr / 2 + dn, braked, fxr, fyr);
     const double fx = fxl + fxr - fyf * std::sin(x.d);
     const double fy = fyf * std::cos(x.d) + fyl + fyr;
     const double mz = lf_ * fyf * std::cos(x.d) - lr_ * (fyl + fyr) + track_ / 2 * (fxr - fxl);
@@ -313,8 +313,8 @@ private:
     return (lo + hi) / 2;
   }
 
-  // the model over the last step with what was acting and the wheel speed measured, its yaw rate pulled
-  // towards the gyro's of when the last reading was taken, and the heading now from the gyro's
+  // the model over the last step with what was acting and the wheel speed measured; its yaw rate corrected by
+  // the gyro's error of when the last reading was taken, and the heading now from the gyro's
   void carry_model(const rclcpp::Time & now)
   {
     for (int i = 0; i < 20; i++) {
@@ -338,7 +338,16 @@ private:
       r_then += a * (history_[j + 1].r - history_[j].r);
       psi_then += a * (history_[j + 1].psi - history_[j].psi);
     }
-    model_.r += GAIN_R * (r_ - r_then);
+    // the model from then on, kept history included: else the next reading corrects the same error again
+    const double dr = r_ - r_then;
+    for (Past & p : history_) {
+      if (p.t > then) {
+        p.psi += dr * (p.t - then).seconds();
+        p.r += dr;
+      }
+    }
+    model_.r += dr;
+    psi_model_ += dr * (now - then).seconds();
     heading_now_ = heading_ + psi_model_ - psi_then;
   }
 
@@ -485,7 +494,7 @@ private:
   }
 
   double wheel_radius_, m_, iz_, lf_, lr_, h_, track_, steer_rate_, steer_dead_, steer_lag_;
-  double c_, mu_f_, b_f_, mu_r_, b_r_, lambda_, locked_, lt_x_, lt_y_, wheel_brake_, gyro_lag_, gyro_scale_, nf_, nr_;
+  double c_, mu_f_, b_f_, mu_r_, b_r_, lambda_, locked_, locked_y_, lt_x_, lt_y_, wheel_brake_, gyro_lag_, gyro_scale_, nf_, nr_;
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, kick_speed_, target_, kick_ahead_, kick_left_, side_in_, sweep_, slide_ref_, gap_min_, gap_max_;
 
