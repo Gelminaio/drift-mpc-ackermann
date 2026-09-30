@@ -42,3 +42,34 @@
     tire_c: 0.678           # +-0.174
     # mu and C correlate. At full slide mu sin(C pi/2): 0.393 +-0.004 front, 0.276 +-0.002 rear.
     # Straight launches with wheelspin: 0.248 +-0.010 (handling.ipynb, 2026-09-25)
+
+    # refit on the lidar paths of 24 handbrake, 1 donut, 5 drift and 8 kick runs: 1.2 s windows from the
+    # measured state and the kick runs whole, time bases corrected (identification.ipynb, 2026-09-30).
+    # The tire formulas above with C, plus: load transfer (longitudinal fit_lt_x of m a_x h / L, lateral
+    # fit_lt_y of m a_y h / T on the rear axle: effective, the body rolls and pitches), rear slip
+    # ((v_x,i - u) / lambda, v_y,i) / u, rear friction x fit_locked while the speed command is 0.
+    # Windows end 3-5 cm off in grip and slide, 6 cm in the drift runs (median); the kick runs whole turn
+    # 6-13 deg less than the car by the brake
+    fit_mu_f: 0.325
+    fit_b_f: 53.7
+    fit_mu_r: 0.296
+    fit_b_r: 24.6
+    fit_lambda: 1.28
+    fit_locked: 1.35
+    fit_lt_x: 0.38
+    fit_lt_y: 1.22
+    fit_steer_lag: 0.046    # s, after steer_dead and the servo rate steer_rate_max
+    steer_dead: 0.030       # s from /drive to the servo (ESP32 echo 32 ms)
+    # wheel speed from the speed command, 30 runs, 0.020 m/s rms: u' = K (command - u) within
+    # -D .. A (1 - u / U); command 0: u' = -u / brake (the motor shorted)
+    wheel_k: 12.5           # 1/s
+    wheel_a: 8.65           # m/s2
+    wheel_u: 1.17           # m/s, loaded free speed
+    wheel_d: 4.64           # m/s2
+    wheel_brake: 0.088      # s
+    # sensor delays against the encoder count (received 7 ms after it is read): the IMU message against its
+    # receive time (a 50 Hz node sees the reading ~12 ms older still), the lidar on the scan receive time
+    # less half a turn (69 +-10 ms in the handbrake runs, 57 +-5 in the kick runs: the driver's grab)
+    gyro_lag: 0.047         # s, +-0.005
+    gyro_scale: 1.0054      # the gyro reads low
+    lidar_lag: 0.063        # s
