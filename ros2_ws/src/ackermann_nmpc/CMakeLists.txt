@@ -67,7 +67,9 @@ target_link_libraries(handbrake_node
   ${ackermann_msgs_TARGETS}
   rclcpp::rclcpp
   ${sensor_msgs_TARGETS}
-  ${std_msgs_TARGETS})
+  ${std_msgs_TARGETS}
+  tf2::tf2
+  tf2_ros::tf2_ros)
 install(TARGETS handbrake_node DESTINATION lib/${PROJECT_NAME})
 
 ament_python_install_package(${PROJECT_NAME})

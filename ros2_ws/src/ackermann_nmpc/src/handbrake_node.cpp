@@ -6,8 +6,12 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
+#include <tf2/exceptions.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 // Handbrake turn to a heading, from rest. Straight up to speed, full lock at speed, then at brake_at
 // (heading from the gyro) speed 0: the motor driver brakes the rear wheels and the car slides. In the
@@ -16,6 +20,10 @@
 // to the stop for a steering held constant, and bisection finds the one that stops at target.
 // The model state in the slide: yaw rate from the gyro, steering from the commands through the lag,
 // vx and vy carried by the model from brake_vx, brake_vy (the wheels are locked).
+// With box, the straight ends at a box on the left instead of after straight s: at rest its side is the
+// nearest line of points left of the path, and the turn starts when the far corner of that side is
+// turn_at m from the rear axle, from the scans (the wheels over-read, 4-6% by the turn). Not
+// before T_STEADY: turning while the car still speeds up, the turn is shorter and less repeatable.
 
 constexpr double DT_MODEL = 0.005;   // s, model steps in the prediction
 constexpr double HORIZON = 1.5;      // s, longest prediction
@@ -27,6 +35,13 @@ constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
 // steering command in the slide, from full lock down to this: countersteered further the car swings
 // back 9-12 deg at the end of the slide (hb_cs, hbn runs), which the model does not do
 constexpr double SLIDE_STEER_MIN = -0.15;
+constexpr double FACE_BAND = 0.04;   // m around the side of the box
+constexpr double GAP = 0.05;         // m between points of the side at rest
+constexpr double BOX_TIMEOUT = 0.5;  // s without the box in the straight: stop
+// s from the start: full speed. Turning at 1.44-1.52 s the car went 0.22-0.35 m on from the turn to
+// the stop, at 1.62-1.86 s 0.55-0.62 (parking.ipynb)
+constexpr double T_STEADY = 1.6;
+constexpr double LATE = 0.05;        // m past turn_at at T_STEADY: the box is too close, stop
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -81,6 +96,10 @@ public:
     // rear axle velocity at the brake, video of the hb_park and hb_sw runs
     brake_vx_ = declare_parameter("brake_vx", 0.82);
     brake_vy_ = declare_parameter("brake_vy", -0.10);
+    box_ = declare_parameter("box", false);
+    // m, far corner of the box ahead of the rear axle at the turn: ~0.58 m from the turn to the stop,
+    // the nose ~0.36 - turn_at m past the corner
+    turn_at_ = declare_parameter("turn_at", 0.26);
 
     pub_drive_ = create_publisher<ackermann_msgs::msg::AckermannDrive>("/drive", 10);
     pub_arm_ = create_publisher<std_msgs::msg::Bool>("/arm", 10);
@@ -93,10 +112,102 @@ public:
           u_ = wheel_radius_ * (m.velocity[0] + m.velocity[1]) / 2;
         }
       });
+    if (box_) {
+      tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+      tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+      sub_scan_ = create_subscription<sensor_msgs::msg::LaserScan>(
+        "/scan", rclcpp::SensorDataQoS(), [this](const sensor_msgs::msg::LaserScan & m) { on_scan(m); });
+    }
     timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::milliseconds(20), [this] { tick(); });
   }
 
 private:
+  void on_scan(const sensor_msgs::msg::LaserScan & m)
+  {
+    if (std::isnan(lidar_x_)) {
+      try {
+        lidar_x_ = tf_buffer_->lookupTransform("base_footprint", m.header.frame_id, tf2::TimePointZero).transform.translation.x;
+      } catch (const tf2::TransformException &) {
+        return;    // the transform comes a moment after the start
+      }
+    }
+    // points from the rear axle along the start heading (the launch veers 0-5 deg: seen from the car
+    // the side of the box would tilt out of FACE_BAND), and their lidar angles
+    const double c = std::cos(heading_), s = std::sin(heading_);
+    std::vector<double> xs, ys, as;
+    for (size_t i = 0; i < m.ranges.size(); i++) {
+      if (std::isfinite(m.ranges[i])) {
+        const double a = m.angle_min + i * m.angle_increment;
+        const double x = m.ranges[i] * std::cos(a) + lidar_x_, y = m.ranges[i] * std::sin(a);
+        xs.push_back(x * c - y * s);
+        ys.push_back(x * s + y * c);
+        as.push_back(a);
+      }
+    }
+    if (phase_ == Phase::WAIT) {
+      // at rest: the side of the box, the nearest points left of the path ahead
+      std::vector<double> left;
+      for (size_t i = 0; i < xs.size(); i++) {
+        if (xs[i] > 0.2 && xs[i] < 2.0 && ys[i] > 0.3 && ys[i] < 1.6) {
+          left.push_back(ys[i]);
+        }
+      }
+      if (left.size() < 10) {
+        return;
+      }
+      std::sort(left.begin(), left.end());
+      side_y_ = left[left.size() / 10];
+    }
+    if (std::isnan(side_y_)) {
+      return;
+    }
+    // the far corner: the last point of the side. At rest the side is the unbroken row of points from
+    // the nearest one (a wall further on can cross the same line); moving, the points near where the
+    // corner should be by now
+    std::vector<size_t> side;
+    for (size_t i = 0; i < xs.size(); i++) {
+      if (std::abs(ys[i] - side_y_) < FACE_BAND && xs[i] > -1.0) {
+        side.push_back(i);
+      }
+    }
+    std::sort(side.begin(), side.end(), [&](size_t a, size_t b) { return xs[a] < xs[b]; });
+    int far = -1;
+    if (phase_ == Phase::WAIT) {
+      for (const size_t i : side) {
+        if (xs[i] < 0.2) {
+          continue;
+        }
+        if (far >= 0 && xs[i] - xs[far] > GAP) {
+          break;
+        }
+        far = i;
+      }
+    } else {
+      const double expected = far_x_ - u_ * (rclcpp::Time(m.header.stamp) - far_t_).seconds();
+      std::vector<double> on_side;
+      for (const size_t i : side) {
+        if (xs[i] > expected - 0.5 && xs[i] < expected + 0.15) {
+          far = i;
+          on_side.push_back(ys[i]);
+        }
+      }
+      if (far < 0) {
+        return;
+      }
+      // the car drifts sideways a few cm: the side where it is now
+      std::sort(on_side.begin(), on_side.end());
+      side_y_ = on_side[on_side.size() / 2];
+    }
+    if (far < 0) {
+      return;
+    }
+    // when the lidar saw it: rplidar_ros stamps the start of the turn, which begins behind and goes
+    // clockwise (a = pi - lidar angle); the sim has scan_time 0
+    far_x_ = xs[far];
+    far_t_ = rclcpp::Time(m.header.stamp) + rclcpp::Duration::from_seconds(m.scan_time * (M_PI - as[far]) / (2 * M_PI));
+    box_scans_++;
+  }
+
   void on_imu(const sensor_msgs::msg::Imu & m)
   {
     const rclcpp::Time now = get_clock()->now();
@@ -203,8 +314,11 @@ private:
     switch (phase_) {
       case Phase::WAIT:
         if (bias_samples_.size() >= 50 && pub_drive_->get_subscription_count() > 0 &&
-          pub_arm_->get_subscription_count() > 0)
+          pub_arm_->get_subscription_count() > 0 && (!box_ || box_scans_ >= 3))
         {
+          if (box_) {
+            RCLCPP_INFO(get_logger(), "box side %.3f m left, far corner %.3f m ahead", side_y_, far_x_);
+          }
           std::sort(bias_samples_.begin(), bias_samples_.end());
           bias_ = bias_samples_[bias_samples_.size() / 2];
           next(Phase::ARM, now);
@@ -220,7 +334,21 @@ private:
         break;
       case Phase::STRAIGHT:
         send(speed_ * std::min(1.0, t / T_RAMP), 0.0);
-        if (t > T_RAMP + straight_) {
+        if (box_) {
+          // the corner carried from the last scan with the wheels
+          const double since = (now - far_t_).seconds();
+          far_now_ = far_x_ - u_ * since;
+          if (since > BOX_TIMEOUT) {
+            RCLCPP_ERROR(get_logger(), "box not seen for %.2f s: stop", since);
+            next(Phase::DONE, now);
+          } else if (t > T_STEADY && far_now_ < turn_at_ - LATE) {
+            RCLCPP_ERROR(get_logger(), "box too close: the corner %.3f m ahead at full speed, stop", far_now_);
+            next(Phase::DONE, now);
+          } else if (t > T_STEADY && far_now_ <= turn_at_) {
+            RCLCPP_INFO(get_logger(), "turn with the far corner %.3f m ahead, %.2f s after the start", far_now_, t);
+            next(Phase::TURN, now);
+          }
+        } else if (t > T_RAMP + straight_) {
           next(Phase::TURN, now);
         }
         break;
@@ -262,7 +390,7 @@ private:
         break;
     }
     std_msgs::msg::Float64MultiArray s;
-    s.data = {static_cast<double>(phase_), heading_, r_, u_, steer_, model_.vx, model_.vy};
+    s.data = {static_cast<double>(phase_), heading_, r_, u_, steer_, model_.vx, model_.vy, far_now_};
     pub_state_->publish(s);
   }
 
@@ -277,19 +405,26 @@ private:
   double wheel_radius_, m_, iz_, lf_, lr_, track_, steer_lag_, brake_lag_;
   double mu_f_, b_f_, mu_r_, b_r_, c_, nf_, nr_;
   std::vector<double> steer_cmd_, steer_angle_;
-  double speed_, straight_, brake_at_, target_, locked_friction_, brake_vx_, brake_vy_;
+  double speed_, straight_, brake_at_, target_, locked_friction_, brake_vx_, brake_vy_, turn_at_;
+  bool box_;
 
   Phase phase_ = Phase::WAIT;
   rclcpp::Time t_phase_{0, 0, RCL_ROS_TIME}, last_imu_{0, 0, RCL_ROS_TIME};
   std::vector<double> bias_samples_;
   double bias_ = 0.0, heading_ = 0.0, heading_brake_ = 0.0, r_ = 0.0, u_ = 0.0, steer_ = 0.52;
   State model_{0, 0, 0, 0};
+  double lidar_x_ = NAN, side_y_ = NAN, far_x_ = NAN, far_now_ = NAN;
+  rclcpp::Time far_t_{0, 0, RCL_ROS_TIME};
+  int box_scans_ = 0;
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
 
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDrive>::SharedPtr pub_drive_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_arm_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_state_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joints_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
