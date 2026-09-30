@@ -451,7 +451,10 @@ private:
         break;
     }
     std_msgs::msg::Float64MultiArray s;
-    s.data = {static_cast<double>(phase_), heading_, r_, u_, steer_, model_.vx, model_.vy, far_now_};
+    std::vector<double> b = b_side_;
+    std::sort(b.begin(), b.end());
+    s.data = {static_cast<double>(phase_), heading_, r_, u_, steer_, model_.vx, model_.vy, far_now_,
+              b.empty() ? NAN : b[b.size() / 2]};
     pub_state_->publish(s);
   }
 
