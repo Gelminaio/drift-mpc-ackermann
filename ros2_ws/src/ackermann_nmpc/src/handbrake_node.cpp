@@ -24,6 +24,8 @@
 // nearest line of points left of the path, and the turn starts when the far corner of that side is
 // turn_at m from the rear axle, from the scans (the wheels over-read, 4-6% by the turn). Not
 // before T_STEADY: turning while the car still speeds up, the turn is shorter and less repeatable.
+// Box B beyond the side of A shows once the car is past A: the steering of the turn is taken from how
+// far out it is (stop_y, stop_steer: where the car stopped with each steering) to stop side_gap from it.
 
 constexpr double DT_MODEL = 0.005;   // s, model steps in the prediction
 constexpr double HORIZON = 1.5;      // s, longest prediction
@@ -45,6 +47,7 @@ constexpr double LATE = 0.05;        // m past turn_at at T_STEADY: the box is t
 // m, pure pursuit on the line of the start in the straight: the launch veered 0.7-1.8 deg by the turn,
 // the stop moved ~4 cm sideways per deg (hbg runs)
 constexpr double LOOKAHEAD = 0.4;
+constexpr double HALF_WIDTH = 0.10;  // m, the car to the outside of the wheels
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -91,21 +94,27 @@ public:
     nr_ = m_ * g * lf_ / l;
     // the run
     speed_ = declare_parameter("speed", 1.5);        // m/s command, above what the motor reaches
-    // the turn: full lock at full throttle by default
-    turn_steer_ = declare_parameter("turn_steer", steer_cmd_.back());
-    turn_speed_ = declare_parameter("turn_speed", speed_);
-    straight_ = declare_parameter("straight", 0.5);  // s at speed before the turn
-    brake_at_ = declare_parameter("brake_at", 145.0) * M_PI / 180;
+    // the turn: in grip, below the speed the motor reaches (at full lock and full throttle the rear lets
+    // go when the floor decides, the stop spread 20 cm sideways; this way 2-4 cm, hbl runs)
+    turn_steer_ = declare_parameter("turn_steer", 0.45);
+    turn_speed_ = declare_parameter("turn_speed", 1.0);
+    straight_ = declare_parameter("straight", 0.6);  // s at speed before the turn
+    brake_at_ = declare_parameter("brake_at", 150.0) * M_PI / 180;
     target_ = declare_parameter("target", 180.0) * M_PI / 180;
     // a locked rear slides with more friction than a spinning one (yaw rate of 16 slides, 2026-09-29)
     locked_friction_ = declare_parameter("locked_friction", 1.5);
-    // rear axle velocity at the brake, video of the hb_park and hb_sw runs
-    brake_vx_ = declare_parameter("brake_vx", 0.82);
-    brake_vy_ = declare_parameter("brake_vy", -0.10);
+    // rear axle velocity at the brake: in grip along the car at about the wheel speed (at full lock and
+    // full throttle 0.82, -0.10 from the video of the hb_park and hb_sw runs)
+    brake_vx_ = declare_parameter("brake_vx", 0.95);
+    brake_vy_ = declare_parameter("brake_vy", 0.0);
     box_ = declare_parameter("box", false);
-    // m, far corner of the box ahead of the rear axle at the turn: ~0.58 m from the turn to the stop,
-    // the nose ~0.36 - turn_at m past the corner
-    turn_at_ = declare_parameter("turn_at", 0.26);
+    // m, far corner of box A ahead of the rear axle at the turn: in grip ~0.37 m from the turn to the
+    // stop, the nose ~0.15 - turn_at m past the corner
+    turn_at_ = declare_parameter("turn_at", 0.05);
+    // m left of the line of the start where the rear axle stopped, with each steering of the turn (hbl runs)
+    stop_y_ = declare_parameter("stop_y", std::vector<double>{0.94, 1.04, 1.14});
+    stop_steer_ = declare_parameter("stop_steer", std::vector<double>{0.45, 0.40, 0.35});
+    side_gap_ = declare_parameter("side_gap", 0.10);  // m from the right side of the car to box B
 
     pub_drive_ = create_publisher<ackermann_msgs::msg::AckermannDrive>("/drive", 10);
     pub_arm_ = create_publisher<std_msgs::msg::Bool>("/arm", 10);
@@ -203,6 +212,26 @@ private:
       // the car drifts sideways a few cm: the side where it is now
       std::sort(on_side.begin(), on_side.end());
       side_y_ = on_side[on_side.size() / 2];
+      // box B: the nearest line of points further out than the side of A and further on than its far
+      // corner (the ends of A are between the two), from the line of the start
+      std::vector<double> beyond;
+      for (size_t i = 0; i < xs.size(); i++) {
+        if (ys[i] > side_y_ + 0.2 && ys[i] < side_y_ + 1.0 && xs[i] > xs[far] + 0.03 && xs[i] < xs[far] + 1.0) {
+          beyond.push_back(ys[i]);
+        }
+      }
+      if (beyond.size() >= 10) {
+        // the line: the points within FACE_BAND of the nearest ones, their median
+        std::sort(beyond.begin(), beyond.end());
+        const double nearest = beyond[beyond.size() / 10];
+        std::vector<double> line;
+        for (const double y : beyond) {
+          if (std::abs(y - nearest) < FACE_BAND) {
+            line.push_back(y);
+          }
+        }
+        b_side_.push_back(line[line.size() / 2] + offset_);
+      }
     }
     if (far < 0) {
       return;
@@ -356,7 +385,22 @@ private:
             RCLCPP_ERROR(get_logger(), "box too close: the corner %.3f m ahead at full speed, stop", far_now_);
             next(Phase::DONE, now);
           } else if (t > T_STEADY && far_now_ <= turn_at_) {
-            RCLCPP_INFO(get_logger(), "turn with the far corner %.3f m ahead, %.2f s after the start", far_now_, t);
+            if (b_side_.size() < 3) {
+              RCLCPP_ERROR(get_logger(), "box B not seen: stop");
+              next(Phase::DONE, now);
+              break;
+            }
+            std::vector<double> b = b_side_;
+            std::sort(b.begin(), b.end());
+            const double stop_y = b[b.size() / 2] - HALF_WIDTH - side_gap_;
+            if (stop_y < stop_y_.front() - 0.02) {
+              RCLCPP_ERROR(get_logger(), "box B too close: the car would stop at %.3f m, stop", stop_y);
+              next(Phase::DONE, now);
+              break;
+            }
+            turn_steer_ = interp(stop_y, stop_y_, stop_steer_);
+            RCLCPP_INFO(get_logger(), "turn with the far corner %.3f m ahead, %.2f s after the start; box B %.3f m left, "
+              "steering %.3f", far_now_, t, b[b.size() / 2], turn_steer_);
             next(Phase::TURN, now);
           }
         } else if (t > T_RAMP + straight_) {
@@ -418,6 +462,8 @@ private:
   double mu_f_, b_f_, mu_r_, b_r_, c_, nf_, nr_;
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, turn_steer_, turn_speed_, straight_, brake_at_, target_, locked_friction_, brake_vx_, brake_vy_, turn_at_;
+  std::vector<double> stop_y_, stop_steer_;
+  double side_gap_;
   bool box_;
 
   Phase phase_ = Phase::WAIT;
@@ -428,6 +474,7 @@ private:
   double lidar_x_ = NAN, side_y_ = NAN, far_x_ = NAN, far_now_ = NAN;
   rclcpp::Time far_t_{0, 0, RCL_ROS_TIME};
   int box_scans_ = 0;
+  std::vector<double> b_side_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
 
