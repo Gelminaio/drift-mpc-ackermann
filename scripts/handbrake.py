@@ -31,8 +31,9 @@ spinner = threading.Thread(target=executor.spin)
 spinner.start()
 
 
-def send(speed, steer, arm=True):
-    pub_arm.publish(Bool(data=arm))
+# arming zeroes the setpoint in the firmware: only at rest (with every command it made the wheel speed
+# ripple, 0.99-1.19 m/s at full throttle in the runs of 2026-09-29)
+def send(speed, steer):
     pub_drive.publish(AckermannDrive(speed=float(speed), steering_angle=float(steer)))
     time.sleep(0.02)
 
@@ -43,6 +44,7 @@ bias = np.median([w for _, w in gz[-50:]])
 
 t0 = time.time()
 while time.time() - t0 < 0.5:                      # armed at rest
+    pub_arm.publish(Bool(data=True))
     send(0.0, 0.0)
 t0 = time.time()
 while time.time() - t0 < T_RAMP + STRAIGHT:        # up to speed, straight
@@ -59,7 +61,8 @@ while time.time() - t0 < T_BRAKE:                  # rear locked
 new = gz[n0 - 1:]
 heading = sum((b[0] - a[0]) * (b[1] - bias) for a, b in zip(new, new[1:]))
 for _ in range(25):
-    send(0.0, 0.0, arm=False)
+    pub_arm.publish(Bool(data=False))
+    send(0.0, 0.0)
 print(f'braked at {np.degrees(at_brake):.0f} deg, stopped at {np.degrees(heading):.0f} deg')
 rclpy.shutdown()     # ends the spin
 spinner.join()
