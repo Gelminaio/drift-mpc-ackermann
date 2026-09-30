@@ -124,34 +124,39 @@ is the unstable middle state of the model: the NMPC holds it in Gazebo, not on t
 
 ## Handbrake
 
-`src/handbrake_node.cpp` (`notebooks/handbrake.ipynb`): straight from the start mark, full lock,
-and at `brake_at` (gyro heading) speed 0: the motor driver locks the rear wheels in 0.35-0.4 s and
+`src/handbrake_node.cpp` (`notebooks/handbrake.ipynb`, `notebooks/parking.ipynb`). From the start mark:
+straight on the line of the start (pure pursuit, the offset from the wheels and the gyro heading), a
+turn, and at `brake_at` (gyro heading) speed 0: the motor driver locks the rear wheels in 0.35-0.4 s and
 the car slides. In the slide, every 20 ms, the Phase 5 model is run to the stop for a steering held
-constant, and bisection finds the one that stops at `target`. The locked rear slides with 1.5 times
-the friction of a spinning one (0.41 against 0.28). Steering between full lock and -0.15:
-countersteered further the car swings back 5-12 deg, which the model does not.
+constant, and bisection finds the one that stops at `target`. The locked rear slides with 1.5 times the
+friction of a spinning one (0.41 against 0.28); the steering stays between full lock and -0.15
+(countersteered further the car swings back 5-12 deg); the slide is aimed 2.6 deg short, since the car
+turns the last degrees as it stops (182.6 +- 1.5 deg over 11 turns aimed at 180).
 
-    ros2 launch ackermann_bringup handbrake.launch.py [brake_at:=145 target:=180] [use_sim_time:=true]
+The turn is in grip, steering 0.35-0.45 at 1.0 m/s: at full lock and full throttle the rear lets go
+when the floor decides and the stops spread 20 cm sideways.
 
-On the tiles, target 180 deg:
+With `box:=true` the car parks between box A, ahead on the left, and box B beyond it. At rest the side
+of A is the nearest line of points left of the path; in the straight the scans, turned by the gyro
+heading, follow its far corner, and the turn starts when it is `turn_at` (0.17 m) ahead of the rear
+axle, not before 1.6 s from the start (turning while the car still speeds up, the turn is shorter and
+less repeatable). Past A, the side of B is the nearest line further out, and the steering of the turn
+comes from how far out it is (`stop_y`, `stop_steer`: 0.35 to 0.45 moves the stop 20 cm) to stop
+`side_gap` (0.10 m) from it.
 
-| | runs | stop [deg] |
-|---|---|---|
-| open loop, brake at 136 deg, full lock in the slide | 6 | 177-197 |
-| node, brake at 145 deg | 6 | 179.9-183.1 |
+    ros2 launch ackermann_bringup handbrake.launch.py box:=true [turn_at:=0.17 side_gap:=0.10] [use_sim_time:=true]
 
-Between two boxes 3 out of 3: 12-24 cm from the nose to the box ahead, 4-6 cm from the side to the
-one beside. The stop position is not controlled: 12 cm along the car between runs.
+On the tiles, target 180 deg, the stops by the lidar:
 
-With `box:=true` the straight ends at the box on the left (`notebooks/parking.ipynb`). At rest its side
-is the nearest line of points left of the path and its far corner the last point of that side; in the
-straight the scans, turned by the gyro heading, follow the corner, and the turn starts when it is
-`turn_at` (0.26 m) ahead of the rear axle, not before 1.6 s from the start: turning while the car still
-speeds up, it covers 0.22-0.35 m from the turn to the stop, at full speed 0.55-0.62. The box moved 19
-cm, the stop 22 cm, the nose 7.0 and 7.6 cm from it. Sideways the stops spread 0.98-1.18 m: at full
-lock and full throttle the floor decides when the rear lets go in the turn.
+| | runs | stop [deg] | stops across [cm] |
+|---|---|---|---|
+| open loop, full lock, brake at 136 deg | 6 | 177-197 | |
+| full lock, turning from box A | 4 | 180.7-186.7 | 20 |
+| grip, on the line of the start | 3 | 180.9-183.2 | 2.3 |
+| grip, from A and B, the same boxes | 3 | 175.9-181.0 | 1.3 |
 
-    ros2 launch ackermann_bringup handbrake.launch.py box:=true [turn_at:=0.26]
+With B 10 cm further out the car stopped 9.6 cm further out; the nose 6-10 cm from A, the side 9-15 cm
+from B.
 
 ## Gazebo
 
