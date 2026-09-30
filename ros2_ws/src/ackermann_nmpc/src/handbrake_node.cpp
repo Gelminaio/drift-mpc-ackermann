@@ -37,6 +37,9 @@ constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
 // steering command in the slide, from full lock down to this: countersteered further the car swings
 // back 9-12 deg at the end of the slide (hb_cs, hbn runs), which the model does not do
 constexpr double SLIDE_STEER_MIN = -0.15;
+// rad the model falls short at the end of the slide, the car turning on its steering as it stops:
+// stopped 2.58 +- 1.47 deg past the target in 11 grip turns (hbl, hbf runs): aimed at that much less
+constexpr double END_BIAS = 2.6 * M_PI / 180;
 constexpr double FACE_BAND = 0.04;   // m around the side of the box
 constexpr double GAP = 0.05;         // m between points of the side at rest
 constexpr double BOX_TIMEOUT = 0.5;  // s without the box in the straight: stop
@@ -308,17 +311,17 @@ private:
 
   double slide_steering() const
   {
-    const double full = steer_cmd_.back(), counter = SLIDE_STEER_MIN;
-    if (final_heading(model_, heading_, u_, counter) >= target_) {
+    const double full = steer_cmd_.back(), counter = SLIDE_STEER_MIN, aim = target_ - END_BIAS;
+    if (final_heading(model_, heading_, u_, counter) >= aim) {
       return counter;
     }
-    if (final_heading(model_, heading_, u_, full) <= target_) {
+    if (final_heading(model_, heading_, u_, full) <= aim) {
       return full;
     }
     double lo = counter, hi = full;
     for (int i = 0; i < 8; i++) {
       const double mid = (lo + hi) / 2;
-      (final_heading(model_, heading_, u_, mid) < target_ ? lo : hi) = mid;
+      (final_heading(model_, heading_, u_, mid) < aim ? lo : hi) = mid;
     }
     return (lo + hi) / 2;
   }
