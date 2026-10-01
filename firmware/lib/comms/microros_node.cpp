@@ -301,7 +301,7 @@ namespace comms
                 rmw_uros_sync_session(100);
             }
 
-            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(1));
 
             if (now - last_publish_ms_ >= 20)
             {
