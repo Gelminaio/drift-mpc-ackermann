@@ -120,6 +120,9 @@ public:
     // slide steering the brake is decided with: full lock, where the model is right; moving the steering off it
     // in the slide the car turned 5 deg less than the model (sideways.ipynb)
     slide_ref_ = declare_parameter("slide_ref", 0.52);
+    // in the slide the steering held at slide_ref, or chosen every step by bisection (slide_bisect): moved in
+    // the slide, the car turned 5 deg less than the model (gap_1-8, sideways.ipynb)
+    slide_bisect_ = declare_parameter("slide_bisect", false);
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
     const double g = 9.81, l = lf_ + lr_;
@@ -456,7 +459,7 @@ private:
         } else if (final_heading(model_, heading_now_, u_, slide_ref_, now) >= target_) {
           heading_brake_ = heading_now_;
           next(Phase::SLIDE, now);
-          steer_ = slide_steering(now);
+          steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
           send(0.0, steer_, now);
         } else {
           send(kick_speed_, steer_cmd_.back(), now);
@@ -464,7 +467,7 @@ private:
         break;
       case Phase::SLIDE:
         carry_model(now);
-        steer_ = slide_steering(now);
+        steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
         send(0.0, steer_, now);
         if (t > T_SLIDE) {
           RCLCPP_INFO(get_logger(), "braked at %.1f deg, stopped at %.1f deg (target %.1f)",
@@ -499,6 +502,7 @@ private:
   double c_, mu_f_, b_f_, mu_r_, b_r_, lambda_, locked_, locked_y_, lt_x_, lt_y_, wheel_brake_, gyro_lag_, gyro_scale_, nf_, nr_;
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, kick_speed_, target_, kick_ahead_, kick_left_, side_in_, sweep_, slide_ref_, gap_min_, gap_max_;
+  bool slide_bisect_;
 
   Phase phase_ = Phase::WAIT;
   rclcpp::Time t_phase_{0, 0, RCL_ROS_TIME}, last_imu_{0, 0, RCL_ROS_TIME}, joints_t_{0, 0, RCL_ROS_TIME};
