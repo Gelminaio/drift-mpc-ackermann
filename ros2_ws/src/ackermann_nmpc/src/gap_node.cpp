@@ -18,15 +18,18 @@
 // Drift parking into a gap between two boxes on the left, from rest. At rest the lidar finds the gap
 // (the side of the boxes towards the car, the two rows of points and the free stretch between them). The
 // car goes slowly on a line, then kicks: full lock, full throttle, the rear steps out and the car drifts
-// round. It brakes (speed 0: the motor driver locks the rear wheels) when the model, run to the stop,
-// says it will end at target; in the slide the steering is chosen every step the same way (bisection),
-// and the car slides sideways into the gap. The car holds the line of the start; it kicks where it will
-// stop with as much room at its nose as beyond its swept tail, from where the car stopped against the
-// kick (kick_ahead, kick_left). The boxes must be where the car will stop sideways (LATERAL_TOL).
+// round. It brakes (speed 0: the motor driver locks the rear wheels) so that the heading where the brake
+// acts plus the turn of the slide at full lock measured on the car (slide_turn) is target, the command
+// sent when due between the steps; the car slides sideways into the gap. With slide_turn 0 the model, run
+// to the stop, decides the brake, and in the slide the steering is chosen by bisection (slide_bisect).
+// The car holds the line of the start; it kicks where it will stop with as much room at its nose as beyond
+// its swept tail, from where the car stopped against the kick (kick_ahead, kick_left). The boxes must be
+// where the car will stop sideways (LATERAL_TOL).
 // The model is the refit of 2026-09-30, carried from the kick with what was sent and the wheel speed. The
 // last gyro reading is gyro_lag older than its message: its yaw rate corrects the model's of that time,
 // and the heading now is the gyro's plus what the model turned since.
 
+constexpr double TICK = 0.02;        // s, the node's step
 constexpr double DT_MODEL = 0.005;   // s, model steps in the prediction
 constexpr double HORIZON = 1.6;      // s, longest prediction
 constexpr double T_RAMP = 1.0;       // s from rest to speed
@@ -123,8 +126,9 @@ public:
     // in the slide the steering held at slide_ref, or chosen every step by bisection (slide_bisect): moved in
     // the slide, the car turned 5 deg less than the model (gap_1-8, sideways.ipynb)
     slide_bisect_ = declare_parameter("slide_bisect", false);
-    // deg the car turns from the brake to the stop at full lock: 35.2 +- 2.5 over 8 runs, whatever its yaw rate
-    // at the brake, where the model's prediction moved the other way (sideways.ipynb). 0: the model decides
+    // deg the car turns from when the brake acts to the stop at full lock: 35.2 +- 2.5 over 8 runs from 30 ms
+    // after the command, whatever its yaw rate at the brake, where the model's prediction moved the other way
+    // (sideways.ipynb). 0: the model decides
     slide_turn_ = declare_parameter("slide_turn", 35.2) * M_PI / 180;
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
@@ -143,7 +147,7 @@ public:
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     sub_scan_ = create_subscription<sensor_msgs::msg::LaserScan>(
       "/scan", rclcpp::SensorDataQoS(), [this](const sensor_msgs::msg::LaserScan & m) { on_scan(m); });
-    timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::milliseconds(20), [this] { tick(); });
+    timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(TICK), [this] { tick(); });
   }
 
 private:
@@ -322,11 +326,11 @@ private:
   }
 
   // the model over the last step with what was acting and the wheel speed measured; its yaw rate corrected by
-  // the gyro's error of when the last reading was taken, and the heading now from the gyro's
+  // the gyro's error of when the last reading was taken, once per reading, and the heading now from the gyro's
   void carry_model(const rclcpp::Time & now)
   {
-    for (int i = 0; i < 20; i++) {
-      const Command & c = acting(now - rclcpp::Duration::from_seconds(0.02 - 0.001 * i));
+    for (int i = 0; i < std::lround(TICK / 0.001); i++) {
+      const Command & c = acting(now - rclcpp::Duration::from_seconds(TICK - 0.001 * i));
       step(model_, u_, c.speed < 0.02, interp(c.steer, steer_cmd_, steer_angle_), 0.001);
       psi_model_ += 0.001 * model_.r;
     }
@@ -334,29 +338,48 @@ private:
     while ((now - history_.front().t).seconds() > gyro_lag_ + 0.1) {
       history_.pop_front();
     }
-    // the model when the last gyro reading was taken, between the two steps around it
-    const rclcpp::Time then = last_imu_ - rclcpp::Duration::from_seconds(gyro_lag_);
-    size_t j = 0;
-    while (j + 1 < history_.size() && history_[j + 1].t <= then) {
-      j++;
-    }
-    double r_then = history_[j].r, psi_then = history_[j].psi;
-    if (j + 1 < history_.size() && history_[j].t < then) {
-      const double a = (then - history_[j].t).seconds() / (history_[j + 1].t - history_[j].t).seconds();
-      r_then += a * (history_[j + 1].r - history_[j].r);
-      psi_then += a * (history_[j + 1].psi - history_[j].psi);
-    }
-    // the model from then on, kept history included: else the next reading corrects the same error again
-    const double dr = r_ - r_then;
-    for (Past & p : history_) {
-      if (p.t > then) {
-        p.psi += dr * (p.t - then).seconds();
-        p.r += dr;
+    if (last_imu_ != corrected_imu_) {
+      corrected_imu_ = last_imu_;
+      // the model when the reading was taken, between the two steps around it
+      const rclcpp::Time then = last_imu_ - rclcpp::Duration::from_seconds(gyro_lag_);
+      size_t j = 0;
+      while (j + 1 < history_.size() && history_[j + 1].t <= then) {
+        j++;
       }
+      double r_then = history_[j].r;
+      psi_then_ = history_[j].psi;
+      if (j + 1 < history_.size() && history_[j].t < then) {
+        const double a = (then - history_[j].t).seconds() / (history_[j + 1].t - history_[j].t).seconds();
+        r_then += a * (history_[j + 1].r - history_[j].r);
+        psi_then_ += a * (history_[j + 1].psi - history_[j].psi);
+      }
+      // the model from then on, kept history included
+      const double dr = r_ - r_then;
+      for (Past & p : history_) {
+        if (p.t > then) {
+          p.psi += dr * (p.t - then).seconds();
+          p.r += dr;
+        }
+      }
+      model_.r += dr;
+      psi_model_ += dr * (now - then).seconds();
     }
-    model_.r += dr;
-    psi_model_ += dr * (now - then).seconds();
-    heading_now_ = heading_ + psi_model_ - psi_then;
+    heading_now_ = heading_ + psi_model_ - psi_then_;
+  }
+
+  void brake()
+  {
+    if (brake_timer_) {
+      brake_timer_->cancel();
+    }
+    if (phase_ != Phase::KICK) {
+      return;    // stopped meanwhile
+    }
+    const rclcpp::Time now = get_clock()->now();
+    heading_brake_ = heading_now_;
+    next(Phase::SLIDE, now);
+    steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
+    send(0.0, steer_, now);
   }
 
   // arming zeroes the setpoint (firmware, sim_car): only at rest, not with every command
@@ -427,8 +450,8 @@ private:
         break;
       case Phase::STRAIGHT: {
         // on the line of the start: position from the wheels and the gyro heading
-        x_ += WHEEL_SLIP * u_ * std::cos(heading_) * 0.02;
-        y_ += WHEEL_SLIP * u_ * std::sin(heading_) * 0.02;
+        x_ += WHEEL_SLIP * u_ * std::cos(heading_) * TICK;
+        y_ += WHEEL_SLIP * u_ * std::sin(heading_) * TICK;
         heading_now_ = heading_;
         const double ty = -std::sin(heading_) * LOOKAHEAD - std::cos(heading_) * y_;
         const double d = std::atan(2 * (lf_ + lr_) * ty / (LOOKAHEAD * LOOKAHEAD + y_ * y_));
@@ -454,24 +477,27 @@ private:
         send(speed_ * std::min(1.0, t / T_RAMP), steer, now);
         break;
       }
-      case Phase::KICK:
+      case Phase::KICK: {
         carry_model(now);
+        if (brake_timer_) {
+          break;    // the brake goes before the next step
+        }
+        // from now until the brake is sent: it acts steer_dead later, the car turning at the rate of now
+        const double due = (target_ - slide_turn_ - heading_now_) / std::max(model_.r, 0.1) - steer_dead_;
         if (t > T_KICK) {
           RCLCPP_ERROR(get_logger(), "heading %.0f deg after %.1f s of kick: stop", heading_now_ * 180 / M_PI, t);
           next(Phase::DONE, now);
-        } else if (slide_turn_ > 0
-          // the brake acts steer_dead after this step, and on average half a step after the threshold
-          ? heading_now_ + model_.r * (steer_dead_ + 0.01) + slide_turn_ >= target_
-          : final_heading(model_, heading_now_, u_, slide_ref_, now) >= target_)
-        {
-          heading_brake_ = heading_now_;
-          next(Phase::SLIDE, now);
-          steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
-          send(0.0, steer_, now);
+        } else if (slide_turn_ > 0 && due <= 0) {
+          brake();
+        } else if (slide_turn_ > 0 && due < TICK) {
+          brake_timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(due), [this] { brake(); });
+        } else if (slide_turn_ == 0 && final_heading(model_, heading_now_, u_, slide_ref_, now) >= target_) {
+          brake();
         } else {
           send(kick_speed_, steer_cmd_.back(), now);
         }
         break;
+      }
       case Phase::SLIDE:
         carry_model(now);
         steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
@@ -518,7 +544,8 @@ private:
   int scans_ = 0;
   double lidar_x_ = NAN, face_y_ = NAN, gap_from_ = NAN, gap_to_ = NAN, mid_x_ = NAN;
   double bias_ = 0.0, heading_ = 0.0, heading_now_ = 0.0, heading_brake_ = 0.0, r_ = 0.0, u_ = 0.0, joints_p_ = 0.0;
-  double x_ = 0.0, y_ = 0.0, steer_ = 0.0, psi_model_ = 0.0;
+  double x_ = 0.0, y_ = 0.0, steer_ = 0.0, psi_model_ = 0.0, psi_then_ = 0.0;
+  rclcpp::Time corrected_imu_{0, 0, RCL_ROS_TIME};
   State model_{0, 0, 0, 0, 0, 0, 0};
   std::deque<Command> sent_;
   std::deque<Past> history_;
@@ -531,7 +558,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joints_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;
-  rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr timer_, brake_timer_;
 };
 
 int main(int argc, char ** argv)
