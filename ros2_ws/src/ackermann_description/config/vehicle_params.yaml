@@ -58,8 +58,9 @@
     fit_locked_y: 0.94
     fit_lt_x: 0.13
     fit_lt_y: 1.48
-    fit_steer_lag: 0.036    # s, after steer_dead and the servo rate steer_rate_max
-    steer_dead: 0.030       # s from /drive to the servo (ESP32 echo 32 ms)
+    fit_steer_lag: 0.036    # s, after the dead time and the servo rate steer_rate_max
+    steer_dead: 0.010       # s from /drive to the wheels, 8 brakes lifted, the firmware taking /drive every 5 ms
+                            # (sideways.ipynb, 2026-10-01); 0.030 before, the runs of identification.ipynb
     # wheel speed from the speed command, 42 runs, 0.021 m/s rms: u' = K (command - u) within
     # -D .. A (1 - u / U); command 0: u' = -u / brake (the motor shorted) (identification.ipynb)
     wheel_k: 12.5           # 1/s
