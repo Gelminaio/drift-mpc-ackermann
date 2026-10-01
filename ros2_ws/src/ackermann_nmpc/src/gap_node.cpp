@@ -110,14 +110,16 @@ public:
     kick_speed_ = declare_parameter("kick_speed", 1.5);   // m/s command, above what the motor reaches
     target_ = declare_parameter("target", 180.0) * M_PI / 180;
     // m, middle of the stopped car ahead of / left of where the kick started: 0.23-0.29 / 0.38-0.48 in
-    // the open-loop runs (hbk_1-8, sideways.ipynb)
-    kick_ahead_ = declare_parameter("kick_ahead", 0.25);
-    kick_left_ = declare_parameter("kick_left", 0.43);
+    // the open-loop runs, 0.24-0.30 / 0.40-0.46 in closed loop (hbk, gap runs, sideways.ipynb)
+    kick_ahead_ = declare_parameter("kick_ahead", 0.245);
+    kick_left_ = declare_parameter("kick_left", 0.46);
     side_in_ = declare_parameter("side_in", 0.02);        // m, side of the stopped car inside the boxes
     // m, the tail swings out past where it stops as the car comes round (0.12-0.18 in hbk_1-8): the car
     // stops with as much room ahead of its nose as beyond the swept tail
     sweep_ = declare_parameter("sweep", 0.17);
-    slide_ref_ = declare_parameter("slide_ref", 0.2);     // slide steering the brake is decided with
+    // slide steering the brake is decided with: full lock, where the model is right; moving the steering off it
+    // in the slide the car turned 5 deg less than the model (sideways.ipynb)
+    slide_ref_ = declare_parameter("slide_ref", 0.52);
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
     const double g = 9.81, l = lf_ + lr_;

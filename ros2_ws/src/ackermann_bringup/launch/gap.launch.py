@@ -24,11 +24,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('target', default_value='180.0'),        # deg, where it should stop
-        DeclareLaunchArgument('kick_ahead', default_value='0.25'),     # m, stopped car ahead of the kick
-        DeclareLaunchArgument('kick_left', default_value='0.43'),      # m, and left of it
+        DeclareLaunchArgument('kick_ahead', default_value='0.245'),    # m, stopped car ahead of the kick
+        DeclareLaunchArgument('kick_left', default_value='0.46'),      # m, and left of it
         DeclareLaunchArgument('side_in', default_value='0.02'),        # m, car side inside the boxes
         DeclareLaunchArgument('sweep', default_value='0.17'),          # m, tail swung past where it stops
-        DeclareLaunchArgument('slide_ref', default_value='0.2'),       # slide steering the brake assumes
+        DeclareLaunchArgument('slide_ref', default_value='0.52'),      # slide steering the brake assumes
         DeclareLaunchArgument('use_sim_time', default_value='false'),  # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         gap,
