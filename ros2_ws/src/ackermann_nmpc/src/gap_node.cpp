@@ -126,10 +126,10 @@ public:
     // in the slide the steering held at slide_ref, or chosen every step by bisection (slide_bisect): moved in
     // the slide, the car turned 5 deg less than the model (gap_1-8, sideways.ipynb)
     slide_bisect_ = declare_parameter("slide_bisect", false);
-    // deg the car turns from when the brake acts to the stop at full lock: 35.2 +- 2.5 over 8 runs from 30 ms
-    // after the command, whatever its yaw rate at the brake, where the model's prediction moved the other way
+    // deg the car turns from when the brake acts to the stop at full lock: 36.4 +- 1.3 in the 11 closed-loop runs
+    // (braking at 137-149 deg), whatever its yaw rate, where the model's prediction moved the other way
     // (sideways.ipynb). 0: the model decides
-    slide_turn_ = declare_parameter("slide_turn", 35.2) * M_PI / 180;
+    slide_turn_ = declare_parameter("slide_turn", 36.4) * M_PI / 180;
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
     const double g = 9.81, l = lf_ + lr_;
