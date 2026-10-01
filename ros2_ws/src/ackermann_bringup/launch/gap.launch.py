@@ -18,7 +18,7 @@ def generate_launch_description():
         parameters=[
             PathJoinSubstitution([description, 'config', 'vehicle_params.yaml']),
             {name: ParameterValue(LaunchConfiguration(name), value_type=float)
-             for name in ['target', 'kick_ahead', 'kick_left', 'side_in', 'sweep', 'slide_ref']},
+             for name in ['target', 'kick_ahead', 'kick_left', 'side_in', 'sweep', 'slide_ref', 'slide_turn']},
             {'slide_bisect': ParameterValue(LaunchConfiguration('slide_bisect'), value_type=bool)},
         ],
     )
@@ -31,6 +31,7 @@ def generate_launch_description():
         DeclareLaunchArgument('sweep', default_value='0.17'),          # m, tail swung past where it stops
         DeclareLaunchArgument('slide_ref', default_value='0.52'),      # slide steering the brake assumes
         DeclareLaunchArgument('slide_bisect', default_value='false'),  # steering by bisection in the slide
+        DeclareLaunchArgument('slide_turn', default_value='35.2'),     # deg turned in the slide, 0: the model
         DeclareLaunchArgument('use_sim_time', default_value='false'),  # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         gap,

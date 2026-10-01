@@ -123,6 +123,9 @@ public:
     // in the slide the steering held at slide_ref, or chosen every step by bisection (slide_bisect): moved in
     // the slide, the car turned 5 deg less than the model (gap_1-8, sideways.ipynb)
     slide_bisect_ = declare_parameter("slide_bisect", false);
+    // deg the car turns from the brake to the stop at full lock: 35.2 +- 2.5 over 8 runs, whatever its yaw rate
+    // at the brake, where the model's prediction moved the other way (sideways.ipynb). 0: the model decides
+    slide_turn_ = declare_parameter("slide_turn", 35.2) * M_PI / 180;
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
     const double g = 9.81, l = lf_ + lr_;
@@ -456,7 +459,11 @@ private:
         if (t > T_KICK) {
           RCLCPP_ERROR(get_logger(), "heading %.0f deg after %.1f s of kick: stop", heading_now_ * 180 / M_PI, t);
           next(Phase::DONE, now);
-        } else if (final_heading(model_, heading_now_, u_, slide_ref_, now) >= target_) {
+        } else if (slide_turn_ > 0
+          // the brake acts steer_dead after this step, and on average half a step after the threshold
+          ? heading_now_ + model_.r * (steer_dead_ + 0.01) + slide_turn_ >= target_
+          : final_heading(model_, heading_now_, u_, slide_ref_, now) >= target_)
+        {
           heading_brake_ = heading_now_;
           next(Phase::SLIDE, now);
           steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
@@ -503,6 +510,7 @@ private:
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, kick_speed_, target_, kick_ahead_, kick_left_, side_in_, sweep_, slide_ref_, gap_min_, gap_max_;
   bool slide_bisect_;
+  double slide_turn_;
 
   Phase phase_ = Phase::WAIT;
   rclcpp::Time t_phase_{0, 0, RCL_ROS_TIME}, last_imu_{0, 0, RCL_ROS_TIME}, joints_t_{0, 0, RCL_ROS_TIME};
