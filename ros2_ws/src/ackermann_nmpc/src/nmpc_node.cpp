@@ -81,6 +81,7 @@ public:
     track_ = load_track(declare_parameter<std::string>("track_file"));
     speed_scale_ = declare_parameter("speed_scale", 1.0);    // fraction of the track speed profile
     laps_ = declare_parameter("laps", 3);
+    open_path_ = declare_parameter("open_path", false);       // a path with an end: stop there
     mu_scale_ = declare_parameter("mu_scale", 1.0);          // floor friction the NMPC assumes
     max_error_ = declare_parameter("max_error", 0.5);        // m off the line: stop
     max_pose_age_ = declare_parameter("max_pose_age", 0.2);  // s since the last odometry: stop
@@ -117,6 +118,11 @@ public:
                                   [this] { tick(); });
   }
 
+  bool finished() const
+  {
+    return finished_;
+  }
+
   ~NmpcNode() override
   {
     nmpc_acados_free(capsule_);
@@ -142,7 +148,7 @@ private:
     } else {
       const size_t i0 = index(s_prev_);
       for (int j = -10; j < 30; j++) {
-        const size_t i = (i0 + len + j) % len;
+        const size_t i = open_path_ ? std::clamp<long>(static_cast<long>(i0) + j, 0, len - 1) : (i0 + len + j) % len;
         const double d = std::hypot(track_.x[i] - x, track_.y[i] - y);
         if (d < best) {
           best = d;
@@ -152,7 +158,7 @@ private:
     }
     const double dx = x - track_.x[k], dy = y - track_.y[k], yaw_k = track_.yaw[k];
     s = track_.s[k] + dx * std::cos(yaw_k) + dy * std::sin(yaw_k);
-    if (!std::isnan(s_prev_)) {
+    if (!open_path_ && !std::isnan(s_prev_)) {
       s += track_.length * std::round((s_prev_ - s) / track_.length);
     }
     n = -dx * std::sin(yaw_k) + dy * std::cos(yaw_k);
@@ -161,7 +167,7 @@ private:
 
   size_t index(double s) const
   {
-    const double sm = s - track_.length * std::floor(s / track_.length);
+    const double sm = open_path_ ? std::clamp(s, 0.0, track_.s.back()) : s - track_.length * std::floor(s / track_.length);
     return std::upper_bound(track_.s.begin(), track_.s.end(), sm) - track_.s.begin() - 1;
   }
 
@@ -231,8 +237,9 @@ private:
     if (!started_) {
       s_start_ = s;
     }
-    if (s - s_start_ >= laps_ * track_.length) {
-      stop(std::to_string(laps_) + " laps");
+    if (open_path_ ? s >= track_.s.back() : s - s_start_ >= laps_ * track_.length) {
+      finished_ = true;
+      stop(open_path_ ? "end of the path" : std::to_string(laps_) + " laps");
       return;
     }
     if (std::abs(n) > max_error_) {
@@ -284,6 +291,7 @@ private:
 
   double wheel_radius_, speed_scale_, mu_scale_, max_error_, max_pose_age_, max_correction_age_;
   int64_t laps_;
+  bool open_path_, finished_ = false;
   std::vector<double> steer_cmd_, steer_angle_;
   Track track_;
 
@@ -314,7 +322,8 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<NmpcNode>());
+  auto node = std::make_shared<NmpcNode>();
+  rclcpp::spin(node);
   rclcpp::shutdown();
-  return 0;
+  return node->finished() ? 0 : 1;    // 1: stopped before the end
 }
