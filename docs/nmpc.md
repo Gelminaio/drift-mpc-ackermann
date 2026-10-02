@@ -158,6 +158,36 @@ On the tiles, target 180 deg, the stops by the lidar:
 With B 10 cm further out the car stopped 9.6 cm further out; the nose 6-10 cm from A, the side 9-15 cm
 from B.
 
+## Gap parking
+
+`src/gap_node.cpp` (`notebooks/sideways.ipynb`, `notebooks/identification.ipynb`). Sideways into the gap
+between two boxes on the left, from rest. At rest the lidar gives the gap; the car holds the line of the
+start at 0.4 m/s and kicks where it will stop with as much room at its nose as beyond its swept tail:
+full lock, full throttle, the rear steps out and the car drifts round at 3.4-4.0 rad/s. It brakes so
+that the heading where the brake acts plus the turn of the slide at full lock (`slide_turn`, 36.4 deg)
+is 180, the command sent when due between the 20 ms steps. The heading now is the gyro's, `gyro_lag`
+old, carried on by the refit model.
+
+    ros2 launch ackermann_bringup gap.launch.py [kick_ahead:=0.30 sweep:=0.12] [use_sim_time:=true]
+
+On the tiles, full lock, closest approach of the body to box A (nose side) and B:
+
+| gap | runs | stop [deg] | closest A / B [cm] |
+|---|---|---|---|
+| 0.60 m | 6 | 171.4-183.8 | 7.1-14.2 / 4.0-9.2 |
+| 0.54 m | 5 | 172.2-183.3 | 2.7-10.9 / 6.4-11.6 |
+| 0.50-0.52 m | 7 | 176.5-185.5 | 1.9-6.7 / 2.9-8.1 |
+| 0.47 m | 9 | 173.2-185.7 | 2.5-6.1 / 1.7-6.8, one touch |
+
+The first runs braked on the model, the later ones on the measured slide. The ESP32 took `/drive`
+every 20 ms, one message per pass: the brake acted 10-41 ms after the command, a delay set at each
+start. Taking it every 5 ms, 10 +- 3 ms.
+
+What is left is the slide: 29.5 deg on freshly wiped tiles (the touch), 35 or 42 on used ones, the two
+modes parting 100 ms after the brake. From the yaw rate the rest of the turn is known to 1.1 deg only
+150 ms in, too late for the servo. Held straight the slide turns 27.1 +- 1.8 deg but the body sweeps
+5 cm further. One run needs 0.40 +- 0.02 m; ~0.50 m keeps 2-7 cm at each end.
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the
