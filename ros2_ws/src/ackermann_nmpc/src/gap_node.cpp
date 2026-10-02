@@ -22,9 +22,10 @@
 // acts plus the turn of the slide at full lock measured on the car (slide_turn) is target, the command
 // sent when due between the steps; the car slides sideways into the gap. With slide_turn 0 the model, run
 // to the stop, decides the brake, and in the slide the steering is chosen by bisection (slide_bisect).
-// The car holds the line of the start; it kicks where it will stop with as much room at its nose as beyond
-// its swept tail, from where the car stopped against the kick (kick_ahead, kick_left). The boxes must be
-// where the car will stop sideways (LATERAL_TOL).
+// The line and the heading come from the boxes: their side is the nearest line of points, at the angle where
+// most points line up on it, so the car may start a little off and askew. The car holds the line where it
+// will stop with its side side_in inside the boxes, and kicks where it will stop with as much room at its
+// nose as beyond its swept tail, from where the car stopped against the kick (kick_ahead, kick_left).
 // The model is the refit of 2026-09-30, carried from the kick with what was sent and the wheel speed. The
 // last gyro reading is gyro_lag older than its message: its yaw rate corrects the model's of that time,
 // and the heading now is the gyro's plus what the model turned since.
@@ -43,7 +44,9 @@ constexpr double WHEEL_SLIP = 0.97;  // car over wheels at the launch (0.94-1.00
 constexpr double HALF_WIDTH = 0.10;  // m, the car to the outside of the wheels
 constexpr double ROW_BREAK = 0.10;   // m between points of one box's row
 constexpr double KICK_MIN = 0.35;    // m from the start: the car at speed
-constexpr double LATERAL_TOL = 0.06; // m, the boxes from where the car will stop sideways
+constexpr double LINE_MAX = 0.30;    // m, the line from the start sideways
+constexpr double FACE_MAX = 0.35;    // rad, the side of the boxes against the car at rest
+constexpr double FACE_STEP = 0.0087; // rad, 0.5 deg
 
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
 {
@@ -168,7 +171,7 @@ private:
       if (std::isfinite(m.ranges[i])) {
         const double a = m.angle_min + i * m.angle_increment;
         const double x = m.ranges[i] * std::cos(a) + lidar_x_, y = m.ranges[i] * std::sin(a);
-        if (x > -0.3 && x < 2.0 && y > 0.15 && y < 1.0) {
+        if (x > -0.3 && x < 2.5 && y > 0.1 && y < 1.2) {
           left_x_.push_back(x);
           left_y_.push_back(y);
         }
@@ -177,20 +180,55 @@ private:
     scans_++;
   }
 
-  // the gap: the side of the boxes is the nearest line of points; along it two rows, the gap between
+  // the gap: the side of the boxes is the nearest line of points, at the angle where most points line up on it;
+  // along it two rows, the gap between. In the frame of that line: x along it, y to its left
   bool find_gap()
   {
     if (left_y_.size() < 50) {
       return false;
     }
-    std::vector<double> ys = left_y_;
-    std::sort(ys.begin(), ys.end());
-    const double near = ys[ys.size() / 10];
+    std::vector<double> ys(left_y_.size());
+    size_t best = 0;
+    double best_near = 0.0;
+    for (double a = -FACE_MAX; a <= FACE_MAX; a += FACE_STEP) {
+      for (size_t i = 0; i < ys.size(); i++) {
+        ys[i] = -std::sin(a) * left_x_[i] + std::cos(a) * left_y_[i];
+      }
+      std::vector<double> sorted = ys;
+      std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 10, sorted.end());
+      const double near = sorted[sorted.size() / 10];
+      const size_t on = std::count_if(ys.begin(), ys.end(), [near](double y) { return std::abs(y - near) < 0.015; });
+      if (on > best) {
+        best = on;
+        best_near = near;
+        face_angle_ = a;
+      }
+    }
+    // finer than the step: a straight line through the points on it
+    double n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (size_t i = 0; i < ys.size(); i++) {
+      if (std::abs(-std::sin(face_angle_) * left_x_[i] + std::cos(face_angle_) * left_y_[i] - best_near) < 0.015) {
+        n += 1;
+        sx += left_x_[i];
+        sy += left_y_[i];
+        sxx += left_x_[i] * left_x_[i];
+        sxy += left_x_[i] * left_y_[i];
+      }
+    }
+    face_angle_ = std::atan((n * sxy - sx * sy) / (n * sxx - sx * sx));
+    std::vector<double> fx(ys.size()), fy(ys.size());
+    for (size_t i = 0; i < ys.size(); i++) {
+      fx[i] = std::cos(face_angle_) * left_x_[i] + std::sin(face_angle_) * left_y_[i];
+      fy[i] = -std::sin(face_angle_) * left_x_[i] + std::cos(face_angle_) * left_y_[i];
+    }
+    std::vector<double> sorted = fy;
+    std::sort(sorted.begin(), sorted.end());
+    const double near = sorted[sorted.size() / 10];
     std::vector<double> side_y, side_x;
-    for (size_t i = 0; i < left_x_.size(); i++) {
-      if (std::abs(left_y_[i] - near) < 0.03) {
-        side_y.push_back(left_y_[i]);
-        side_x.push_back(left_x_[i]);
+    for (size_t i = 0; i < fx.size(); i++) {
+      if (std::abs(fy[i] - near) < 0.03) {
+        side_y.push_back(fy[i]);
+        side_x.push_back(fx[i]);
       }
     }
     std::sort(side_y.begin(), side_y.end());
@@ -422,16 +460,16 @@ private:
             break;
           }
           // where the middle of the car stops: the same room at the nose and beyond the swept tail; its side
-          // side_in inside the boxes
+          // side_in inside the boxes. The line the car holds to get there
           mid_x_ = (gap_from_ + gap_to_ - sweep_) / 2;
-          const double mid_y = face_y_ + HALF_WIDTH + side_in_;
-          RCLCPP_INFO(get_logger(), "gap %.3f .. %.3f m ahead, boxes %.3f m left: kick at %.3f m, the car %.3f m too far in",
-            gap_from_, gap_to_, face_y_, mid_x_ - kick_ahead_, kick_left_ - mid_y);
+          y_line_ = face_y_ + HALF_WIDTH + side_in_ - kick_left_;
+          RCLCPP_INFO(get_logger(), "gap %.3f .. %.3f m ahead, boxes %.3f m left at %.1f deg: kick at %.3f m, the line %.3f m left",
+            gap_from_, gap_to_, face_y_, face_angle_ * 180 / M_PI, mid_x_ - kick_ahead_, y_line_);
           if (gap_to_ - gap_from_ < gap_min_ || gap_to_ - gap_from_ > gap_max_ || mid_x_ - kick_ahead_ < KICK_MIN ||
-            std::abs(kick_left_ - mid_y) > LATERAL_TOL)
+            std::abs(y_line_) > LINE_MAX)
           {
-            RCLCPP_ERROR(get_logger(), "gap %.3f m (%.2f .. %.2f), kick at %.3f m (min %.2f), sideways %.3f m (max %.2f): stop",
-              gap_to_ - gap_from_, gap_min_, gap_max_, mid_x_ - kick_ahead_, KICK_MIN, kick_left_ - mid_y, LATERAL_TOL);
+            RCLCPP_ERROR(get_logger(), "gap %.3f m (%.2f .. %.2f), kick at %.3f m (min %.2f), the line %.3f m left (max %.2f): stop",
+              gap_to_ - gap_from_, gap_min_, gap_max_, mid_x_ - kick_ahead_, KICK_MIN, y_line_, LINE_MAX);
             next(Phase::DONE, now);
             break;
           }
@@ -444,17 +482,18 @@ private:
         arm(true);
         send(0.0, 0.0, now);
         if (t > T_ARM) {
-          heading_ = 0.0;
+          heading_ = -face_angle_;    // from here on the frame of the boxes
           next(Phase::STRAIGHT, now);
         }
         break;
       case Phase::STRAIGHT: {
-        // on the line of the start: position from the wheels and the gyro heading
+        // pure pursuit on the line: position from the wheels and the gyro heading
         x_ += WHEEL_SLIP * u_ * std::cos(heading_) * TICK;
         y_ += WHEEL_SLIP * u_ * std::sin(heading_) * TICK;
         heading_now_ = heading_;
-        const double ty = -std::sin(heading_) * LOOKAHEAD - std::cos(heading_) * y_;
-        const double d = std::atan(2 * (lf_ + lr_) * ty / (LOOKAHEAD * LOOKAHEAD + y_ * y_));
+        const double off = y_ - y_line_;
+        const double ty = -std::sin(heading_) * LOOKAHEAD - std::cos(heading_) * off;
+        const double d = std::atan(2 * (lf_ + lr_) * ty / (LOOKAHEAD * LOOKAHEAD + off * off));
         const double steer = interp(d, steer_angle_, steer_cmd_);
         // where the car would stop kicking now, along the line
         const double stop_x = x_ + std::cos(heading_) * kick_ahead_ - std::sin(heading_) * kick_left_;
@@ -542,7 +581,7 @@ private:
   rclcpp::Time t_phase_{0, 0, RCL_ROS_TIME}, last_imu_{0, 0, RCL_ROS_TIME}, joints_t_{0, 0, RCL_ROS_TIME};
   std::vector<double> bias_samples_, left_x_, left_y_;
   int scans_ = 0;
-  double lidar_x_ = NAN, face_y_ = NAN, gap_from_ = NAN, gap_to_ = NAN, mid_x_ = NAN;
+  double lidar_x_ = NAN, face_y_ = NAN, face_angle_ = 0.0, gap_from_ = NAN, gap_to_ = NAN, mid_x_ = NAN, y_line_ = 0.0;
   double bias_ = 0.0, heading_ = 0.0, heading_now_ = 0.0, heading_brake_ = 0.0, r_ = 0.0, u_ = 0.0, joints_p_ = 0.0;
   double x_ = 0.0, y_ = 0.0, steer_ = 0.0, psi_model_ = 0.0, psi_then_ = 0.0;
   rclcpp::Time corrected_imu_{0, 0, RCL_ROS_TIME};
