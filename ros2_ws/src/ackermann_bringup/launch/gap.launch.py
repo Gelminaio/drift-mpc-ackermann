@@ -25,10 +25,10 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('target', default_value='180.0'),        # deg, where it should stop
-        DeclareLaunchArgument('kick_ahead', default_value='0.245'),    # m, stopped car ahead of the kick
-        DeclareLaunchArgument('kick_left', default_value='0.46'),      # m, and left of it
+        DeclareLaunchArgument('kick_ahead', default_value='0.30'),    # m, stopped car ahead of the kick
+        DeclareLaunchArgument('kick_left', default_value='0.42'),      # m, and left of it
         DeclareLaunchArgument('side_in', default_value='0.02'),        # m, car side inside the boxes
-        DeclareLaunchArgument('sweep', default_value='0.17'),          # m, tail swung past where it stops
+        DeclareLaunchArgument('sweep', default_value='0.12'),          # m, tail swung past where it stops
         DeclareLaunchArgument('slide_ref', default_value='0.52'),      # slide steering the brake assumes
         DeclareLaunchArgument('slide_bisect', default_value='false'),  # steering by bisection in the slide
         DeclareLaunchArgument('slide_turn', default_value='36.4'),     # deg turned in the slide, 0: the model
