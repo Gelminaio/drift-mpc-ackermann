@@ -22,7 +22,9 @@
 // acts plus the turn of the slide at full lock measured on the car (slide_turn) is target, the command
 // sent when due between the steps; the car slides sideways into the gap. With slide_turn 0 the model, run
 // to the stop, decides the brake, and in the slide the steering is chosen by bisection (slide_bisect).
-// The line and the heading come from the boxes: their side is the nearest line of points, at the angle where
+// With donut_turns, first a donut where the car is: full lock, full throttle from rest, braked so that it ends
+// at donut_exit after the turns; the gap is found where it stops. The line and the heading come from the boxes:
+// their side is the nearest line of points, at the angle where
 // most points line up on it, so the car may start a little off and askew. The car holds the line where it
 // will stop with its side side_in inside the boxes, and kicks where it will stop with as much room at its
 // nose as beyond its swept tail, from where the car stopped against the kick (kick_ahead, kick_left).
@@ -37,6 +39,9 @@ constexpr double T_RAMP = 1.0;       // s from rest to speed
 constexpr double T_ARM = 0.5;        // s armed at rest before starting
 constexpr double T_KICK = 2.0;       // s kicking without braking: stop
 constexpr double T_SLIDE = 1.5;      // s from the brake to the end
+constexpr double T_DONUT = 1.8;      // s per turn of the donut: stop
+constexpr double T_REST = 0.3;       // s at rest after the donut before the scans
+constexpr double T_SETTLE = 3.0;     // s from the donut's brake to the gap: stop
 constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
 constexpr double SLIDE_STEER_MIN = -0.15;   // countersteered further the car swings back (hbn runs)
 constexpr double LOOKAHEAD = 0.4;    // m, pure pursuit on the line of the approach
@@ -133,6 +138,10 @@ public:
     // (braking at 137-149 deg), whatever its yaw rate, where the model's prediction moved the other way
     // (sideways.ipynb). 0: the model decides
     slide_turn_ = declare_parameter("slide_turn", 36.4) * M_PI / 180;
+    // donut before the parking: turns (0: none), braked to end at donut_exit (deg, against the start heading)
+    donut_turns_ = declare_parameter("donut_turns", 0);
+    donut_exit_ = declare_parameter("donut_exit", 180.0) * M_PI / 180;
+    collecting_ = donut_turns_ == 0;
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
     const double g = 9.81, l = lf_ + lr_;
@@ -157,7 +166,7 @@ private:
   // at rest: points left of the car from a few scans
   void on_scan(const sensor_msgs::msg::LaserScan & m)
   {
-    if (phase_ != Phase::WAIT) {
+    if (!collecting_) {
       return;
     }
     if (std::isnan(lidar_x_)) {
@@ -410,14 +419,37 @@ private:
     if (brake_timer_) {
       brake_timer_->cancel();
     }
-    if (phase_ != Phase::KICK) {
+    if (phase_ != Phase::KICK && phase_ != Phase::DONUT) {
       return;    // stopped meanwhile
     }
     const rclcpp::Time now = get_clock()->now();
     heading_brake_ = heading_now_;
-    next(Phase::SLIDE, now);
-    steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
+    const bool donut = phase_ == Phase::DONUT;
+    next(donut ? Phase::SETTLE : Phase::SLIDE, now);
+    steer_ = slide_bisect_ && !donut ? slide_steering(now) : slide_ref_;
     send(0.0, steer_, now);
+  }
+
+  // where the middle of the car stops: the same room at the nose and beyond the swept tail; its side side_in
+  // inside the boxes. The line the car holds to get there
+  bool plan_gap()
+  {
+    if (!find_gap()) {
+      RCLCPP_ERROR(get_logger(), "no gap on the left: stop");
+      return false;
+    }
+    mid_x_ = (gap_from_ + gap_to_ - sweep_) / 2;
+    y_line_ = face_y_ + HALF_WIDTH + side_in_ - kick_left_;
+    RCLCPP_INFO(get_logger(), "gap %.3f .. %.3f m ahead, boxes %.3f m left at %.1f deg: kick at %.3f m, the line %.3f m left",
+      gap_from_, gap_to_, face_y_, face_angle_ * 180 / M_PI, mid_x_ - kick_ahead_, y_line_);
+    if (gap_to_ - gap_from_ < gap_min_ || gap_to_ - gap_from_ > gap_max_ || mid_x_ - kick_ahead_ < KICK_MIN ||
+      std::abs(y_line_) > LINE_MAX)
+    {
+      RCLCPP_ERROR(get_logger(), "gap %.3f m (%.2f .. %.2f), kick at %.3f m (min %.2f), the line %.3f m left (max %.2f): stop",
+        gap_to_ - gap_from_, gap_min_, gap_max_, mid_x_ - kick_ahead_, KICK_MIN, y_line_, LINE_MAX);
+      return false;
+    }
+    return true;
   }
 
   // arming zeroes the setpoint (firmware, sim_car): only at rest, not with every command
@@ -451,25 +483,10 @@ private:
     }
     switch (phase_) {
       case Phase::WAIT:
-        if (bias_samples_.size() >= 50 && scans_ >= 5 && pub_drive_->get_subscription_count() > 0 &&
+        if (bias_samples_.size() >= 50 && (donut_turns_ > 0 || scans_ >= 5) && pub_drive_->get_subscription_count() > 0 &&
           pub_arm_->get_subscription_count() > 0)
         {
-          if (!find_gap()) {
-            RCLCPP_ERROR(get_logger(), "no gap on the left: stop");
-            next(Phase::DONE, now);
-            break;
-          }
-          // where the middle of the car stops: the same room at the nose and beyond the swept tail; its side
-          // side_in inside the boxes. The line the car holds to get there
-          mid_x_ = (gap_from_ + gap_to_ - sweep_) / 2;
-          y_line_ = face_y_ + HALF_WIDTH + side_in_ - kick_left_;
-          RCLCPP_INFO(get_logger(), "gap %.3f .. %.3f m ahead, boxes %.3f m left at %.1f deg: kick at %.3f m, the line %.3f m left",
-            gap_from_, gap_to_, face_y_, face_angle_ * 180 / M_PI, mid_x_ - kick_ahead_, y_line_);
-          if (gap_to_ - gap_from_ < gap_min_ || gap_to_ - gap_from_ > gap_max_ || mid_x_ - kick_ahead_ < KICK_MIN ||
-            std::abs(y_line_) > LINE_MAX)
-          {
-            RCLCPP_ERROR(get_logger(), "gap %.3f m (%.2f .. %.2f), kick at %.3f m (min %.2f), the line %.3f m left (max %.2f): stop",
-              gap_to_ - gap_from_, gap_min_, gap_max_, mid_x_ - kick_ahead_, KICK_MIN, y_line_, LINE_MAX);
+          if (donut_turns_ == 0 && !plan_gap()) {
             next(Phase::DONE, now);
             break;
           }
@@ -482,8 +499,62 @@ private:
         arm(true);
         send(0.0, 0.0, now);
         if (t > T_ARM) {
-          heading_ = -face_angle_;    // from here on the frame of the boxes
+          if (donut_turns_ > 0) {
+            heading_ = 0.0;
+            model_ = {0.0, 0.0, r_, 0.0, 0.0, 0.0, 0.0};
+            psi_model_ = 0.0;
+            history_.clear();
+            next(Phase::DONUT, now);
+            send(kick_speed_, steer_cmd_.back(), now);
+          } else {
+            heading_ = -face_angle_;    // from here on the frame of the boxes
+            next(Phase::STRAIGHT, now);
+          }
+        }
+        break;
+      case Phase::DONUT: {
+        carry_model(now);
+        if (brake_timer_ && !brake_timer_->is_canceled()) {
+          break;    // the brake goes before the next step
+        }
+        const double due = (donut_turns_ * 2 * M_PI + donut_exit_ - slide_turn_ - heading_now_) / std::max(model_.r, 0.1) - steer_dead_;
+        if (t > T_DONUT * donut_turns_ + T_KICK) {
+          RCLCPP_ERROR(get_logger(), "heading %.0f deg after %.1f s of donut: stop", heading_now_ * 180 / M_PI, t);
+          next(Phase::DONE, now);
+        } else if (due <= 0) {
+          brake();
+        } else if (due < TICK) {
+          brake_timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(due), [this] { brake(); });
+        } else {
+          send(kick_speed_, steer_cmd_.back(), now);
+        }
+        break;
+      }
+      case Phase::SETTLE:
+        // braked to a stop, then the scans at rest
+        send(0.0, slide_ref_, now);
+        if (std::abs(u_) > 0.02 || std::abs(r_) > 0.05) {
+          rest_ = now;
+        } else if (!collecting_ && (now - rest_).seconds() > T_REST) {
+          RCLCPP_INFO(get_logger(), "donut braked at %.1f deg, stopped at %.1f deg (exit %.1f)", heading_brake_ * 180 / M_PI,
+            heading_ * 180 / M_PI, (donut_turns_ * 2 * M_PI + donut_exit_) * 180 / M_PI);
+          left_x_.clear();
+          left_y_.clear();
+          scans_ = 0;
+          collecting_ = true;
+        }
+        if (collecting_ && scans_ >= 5) {
+          collecting_ = false;
+          if (!plan_gap()) {
+            next(Phase::DONE, now);
+            break;
+          }
+          heading_ = -face_angle_;
+          x_ = y_ = 0.0;
           next(Phase::STRAIGHT, now);
+        } else if (t > T_SETTLE) {
+          RCLCPP_ERROR(get_logger(), "%.1f s after the donut's brake, no gap yet: stop", t);
+          next(Phase::DONE, now);
         }
         break;
       case Phase::STRAIGHT: {
@@ -518,7 +589,7 @@ private:
       }
       case Phase::KICK: {
         carry_model(now);
-        if (brake_timer_) {
+        if (brake_timer_ && !brake_timer_->is_canceled()) {
           break;    // the brake goes before the next step
         }
         // from now until the brake is sent: it acts steer_dead later, the car turning at the rate of now
@@ -562,7 +633,7 @@ private:
     pub_state_->publish(s);
   }
 
-  enum class Phase { WAIT, ARM, STRAIGHT, KICK, SLIDE, DONE };
+  enum class Phase { WAIT, ARM, STRAIGHT, KICK, SLIDE, DONE, DONUT, SETTLE };
 
   void next(Phase p, const rclcpp::Time & now)
   {
@@ -574,8 +645,9 @@ private:
   double c_, mu_f_, b_f_, mu_r_, b_r_, lambda_, locked_, locked_y_, lt_x_, lt_y_, wheel_brake_, gyro_lag_, gyro_scale_, nf_, nr_;
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, kick_speed_, target_, kick_ahead_, kick_left_, side_in_, sweep_, slide_ref_, gap_min_, gap_max_;
-  bool slide_bisect_;
-  double slide_turn_;
+  bool slide_bisect_, collecting_;
+  double slide_turn_, donut_exit_;
+  int64_t donut_turns_;
 
   Phase phase_ = Phase::WAIT;
   rclcpp::Time t_phase_{0, 0, RCL_ROS_TIME}, last_imu_{0, 0, RCL_ROS_TIME}, joints_t_{0, 0, RCL_ROS_TIME};
@@ -584,7 +656,7 @@ private:
   double lidar_x_ = NAN, face_y_ = NAN, face_angle_ = 0.0, gap_from_ = NAN, gap_to_ = NAN, mid_x_ = NAN, y_line_ = 0.0;
   double bias_ = 0.0, heading_ = 0.0, heading_now_ = 0.0, heading_brake_ = 0.0, r_ = 0.0, u_ = 0.0, joints_p_ = 0.0;
   double x_ = 0.0, y_ = 0.0, steer_ = 0.0, psi_model_ = 0.0, psi_then_ = 0.0;
-  rclcpp::Time corrected_imu_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time corrected_imu_{0, 0, RCL_ROS_TIME}, rest_{0, 0, RCL_ROS_TIME};
   State model_{0, 0, 0, 0, 0, 0, 0};
   std::deque<Command> sent_;
   std::deque<Past> history_;

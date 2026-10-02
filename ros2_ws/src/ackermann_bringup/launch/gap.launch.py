@@ -20,6 +20,8 @@ def generate_launch_description():
             {name: ParameterValue(LaunchConfiguration(name), value_type=float)
              for name in ['target', 'kick_ahead', 'kick_left', 'side_in', 'sweep', 'slide_ref', 'slide_turn']},
             {'slide_bisect': ParameterValue(LaunchConfiguration('slide_bisect'), value_type=bool)},
+            {'donut_turns': ParameterValue(LaunchConfiguration('donut_turns'), value_type=int),
+             'donut_exit': ParameterValue(LaunchConfiguration('donut_exit'), value_type=float)},
         ],
     )
 
@@ -32,6 +34,8 @@ def generate_launch_description():
         DeclareLaunchArgument('slide_ref', default_value='0.52'),      # slide steering the brake assumes
         DeclareLaunchArgument('slide_bisect', default_value='false'),  # steering by bisection in the slide
         DeclareLaunchArgument('slide_turn', default_value='36.4'),     # deg turned in the slide, 0: the model
+        DeclareLaunchArgument('donut_turns', default_value='0'),       # donut before the parking: turns
+        DeclareLaunchArgument('donut_exit', default_value='180.0'),    # deg, its exit against the start
         DeclareLaunchArgument('use_sim_time', default_value='false'),  # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         gap,
