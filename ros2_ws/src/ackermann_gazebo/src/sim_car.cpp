@@ -2,6 +2,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -25,8 +26,10 @@
 #include <yaml-cpp/yaml.h>
 
 // The ESP32 and the car in Gazebo. /drive and /arm in, /joint_states, /imu/data_raw and
-// /steering_angle out at 50 Hz as the firmware does; the car moves by the Phase 5 model
-// (scripts/vehicle_model.py), RK4 at the world step. /ground_truth: the true state.
+// /steering_angle out at 50 Hz as the firmware does; the car moves by the refit of 2026-09-30
+// (vehicle_params.yaml, fit_*), RK4 at the world step: commands steer_dead late, the servo rate
+// limited, the wheel speed loop / motor line / shorted motor, the gyro gyro_lag late and gyro_scale
+// low as on the car. /ground_truth: the true state.
 // Parameter mu_scale: floor friction against the tiles, can change while driving.
 
 namespace ackermann_gazebo
@@ -54,9 +57,19 @@ using State = std::array<double, N>;
 struct Params
 {
   double mass, iz, lf, lr, track, wheel_radius, nf, nr;
-  double mu_f, b_f, mu_r, b_r, c, lambda, load_transfer, h_cg, steer_lag, brake_lag, v_max;
-  std::vector<double> steer_cmd, steer_angle, speed_lag_v, speed_lag;
+  double mu_f, b_f, mu_r, b_r, c, lambda, load_transfer, load_transfer_x, locked, locked_y, h_cg;
+  double steer_lag, steer_rate, steer_dead, wheel_k, wheel_a, wheel_u, wheel_d, wheel_brake, gyro_lag, gyro_scale;
+  std::vector<double> steer_cmd, steer_angle;
 };
+
+// the wheel speed from the speed setpoint: speed loop within the motor line, or braked (motor shorted)
+double wheel_accel(const Params & p, double u, double setpoint, bool braked)
+{
+  if (braked) {
+    return -u / p.wheel_brake;
+  }
+  return std::clamp(p.wheel_k * (std::min(setpoint, p.wheel_u) - u), -p.wheel_d, p.wheel_a * (1 - u / p.wheel_u));
+}
 
 // as np.interp: linear, held at the ends
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
@@ -75,26 +88,33 @@ double interp(double x, const std::vector<double> & xs, const std::vector<double
 // small slip does not (brush model), so mu -> mu_scale mu and B -> B / mu_scale.
 
 // one rear wheel at surface speed u under load n: force against its sliding direction, the
-// longitudinal slip weighed down by lambda (1 in the model)
-void rear_wheel(const Params & p, double mu_scale, double n, double vx, double vy, double u, double & fx, double & fy)
+// longitudinal slip weighed down by lambda, the force across the wheel x ky
+void rear_wheel(const Params & p, double mu_scale, double ky, double n, double vx, double vy, double u, double & fx,
+                double & fy)
 {
   const double sx = (vx - u) / std::max(u, 0.1) / p.lambda, sy = vy / std::max(u, 0.1);
   const double s = std::hypot(sx, sy) + 1e-9;
   const double f = mu_scale * p.mu_r * n * std::sin(p.c * std::atan(p.b_r / mu_scale * s));
   fx = -f * sx / s;
-  fy = -f * sy / s;
+  fy = -ky * f * sy / s;
 }
 
-State deriv(const Params & p, double mu_scale, const State & x, double d_cmd, double u_cmd, double tau_u)
+// servo: the wheel angle behind the servo (rate limited) by steer_lag. ax, ay: the acceleration of the
+// last step for the load transfer, longitudinal load_transfer_x of m ax h / L and lateral load_transfer of
+// m ay h / T on the rear axle. Braked: the rear friction x locked along the wheel, x locked_y across it
+State deriv(const Params & p, double mu_scale, const State & x, double servo, double setpoint, bool braked,
+            double ax, double ay)
 {
   const double vx = std::max(x[VX], 0.05), vy = x[VY], r = x[R], d = x[D];
+  const double dn_x = p.load_transfer_x * p.mass * ax * p.h_cg / (p.lf + p.lr);
+  const double dn = p.load_transfer * p.mass * ay * p.h_cg / p.track;
   const double alpha_f = d - std::atan((vy + p.lf * r) / vx);
-  const double fyf = mu_scale * p.mu_f * p.nf * std::sin(p.c * std::atan(p.b_f / mu_scale * alpha_f));
-  // load from the inner (left) to the outer rear wheel: load_transfer of m ay h / T (0 in the model)
-  const double dn = p.load_transfer * p.mass * vx * r * p.h_cg / p.track;
+  const double fyf = mu_scale * p.mu_f * (p.nf - dn_x) * std::sin(p.c * std::atan(p.b_f / mu_scale * alpha_f));
+  const double k = braked ? mu_scale * p.locked : mu_scale, ky = braked ? p.locked_y / p.locked : 1.0;
+  const double nr = p.nr + dn_x;
   double fxl, fyl, fxr, fyr;
-  rear_wheel(p, mu_scale, std::max(p.nr / 2 - dn, 0.0), vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
-  rear_wheel(p, mu_scale, std::max(p.nr / 2 + dn, 0.0), vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
+  rear_wheel(p, k, ky, std::max(nr / 2 - dn, 0.0), vx - p.track / 2 * r, vy - p.lr * r, x[U], fxl, fyl);
+  rear_wheel(p, k, ky, std::max(nr / 2 + dn, 0.0), vx + p.track / 2 * r, vy - p.lr * r, x[U], fxr, fyr);
   const double fx = fxl + fxr - fyf * std::sin(d);
   const double fy = fyf * std::cos(d) + fyl + fyr;
   const double mz = p.lf * fyf * std::cos(d) - p.lr * (fyl + fyr) + p.track / 2 * (fxr - fxl);
@@ -106,8 +126,8 @@ State deriv(const Params & p, double mu_scale, const State & x, double d_cmd, do
   dx[VX] = fx / p.mass + x[VY] * x[R];
   dx[VY] = fy / p.mass - x[VX] * x[R];
   dx[R] = mz / p.iz;
-  dx[D] = (d_cmd - x[D]) / p.steer_lag;
-  dx[U] = (u_cmd - x[U]) / tau_u;
+  dx[D] = (servo - x[D]) / p.steer_lag;
+  dx[U] = wheel_accel(p, x[U], setpoint, braked);
   return dx;
 }
 
@@ -145,19 +165,29 @@ public:
     p_.wheel_radius = y["wheel_radius"].as<double>();
     p_.nf = p_.mass * 9.81 * p_.lr / (p_.lf + p_.lr);
     p_.nr = p_.mass * 9.81 * p_.lf / (p_.lf + p_.lr);
-    p_.mu_f = y["tire_mu_f"].as<double>();
-    p_.b_f = y["tire_b_f"].as<double>();
-    p_.mu_r = y["tire_mu_r"].as<double>();
-    p_.b_r = y["tire_b_r"].as<double>();
+    p_.mu_f = y["fit_mu_f"].as<double>();
+    p_.b_f = y["fit_b_f"].as<double>();
+    p_.mu_r = y["fit_mu_r"].as<double>();
+    p_.b_r = y["fit_b_r"].as<double>();
     p_.c = y["tire_c"].as<double>();
+    p_.lambda = y["fit_lambda"].as<double>();
+    p_.load_transfer = y["fit_lt_y"].as<double>();
+    p_.load_transfer_x = y["fit_lt_x"].as<double>();
+    p_.locked = y["fit_locked"].as<double>();
+    p_.locked_y = y["fit_locked_y"].as<double>();
     p_.h_cg = y["h_cg"].as<double>();
-    p_.steer_lag = y["steer_lag"].as<double>();
-    p_.brake_lag = y["brake_lag"].as<double>();
-    p_.v_max = y["v_max"].as<double>();
+    p_.steer_lag = y["fit_steer_lag"].as<double>();
+    p_.steer_rate = y["steer_rate_max"].as<double>();
+    p_.steer_dead = y["steer_dead"].as<double>();
+    p_.wheel_k = y["wheel_k"].as<double>();
+    p_.wheel_a = y["wheel_a"].as<double>();
+    p_.wheel_u = y["wheel_u"].as<double>();
+    p_.wheel_d = y["wheel_d"].as<double>();
+    p_.wheel_brake = y["wheel_brake"].as<double>();
+    p_.gyro_lag = y["gyro_lag"].as<double>();
+    p_.gyro_scale = y["gyro_scale"].as<double>();
     p_.steer_cmd = y["steer_cmd"].as<std::vector<double>>();
     p_.steer_angle = y["steer_angle"].as<std::vector<double>>();
-    p_.speed_lag_v = y["speed_lag_v"].as<std::vector<double>>();
-    p_.speed_lag = y["speed_lag"].as<std::vector<double>>();
     // IMU from the CG, body frame; the URDF gives it from the rear axle
     rho_x_ = sdf->Get<double>("imu_x") - p_.lr;
     rho_y_ = sdf->Get<double>("imu_y");
@@ -174,7 +204,7 @@ public:
     node_->declare_parameter("mu_scale", 1.0, range);
     // the tire of this car, the model's unless set: to test a controller against a car unlike its
     // model. mu_f, b_f, mu_r, b_r, c, lambda, load_transfer
-    node_->declare_parameter("tire", std::vector<double>{p_.mu_f, p_.b_f, p_.mu_r, p_.b_r, p_.c, 1.0, 0.0});
+    node_->declare_parameter("tire", std::vector<double>{p_.mu_f, p_.b_f, p_.mu_r, p_.b_r, p_.c, p_.lambda, p_.load_transfer});
     pub_joints_ = node_->create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
     pub_imu_ = node_->create_publisher<sensor_msgs::msg::Imu>("imu/data_raw", 10);
     pub_steering_ = node_->create_publisher<std_msgs::msg::Float32>("steering_angle", 10);
@@ -182,8 +212,9 @@ public:
     sub_drive_ = node_->create_subscription<ackermann_msgs::msg::AckermannDrive>(
       "drive", 10, [this](const ackermann_msgs::msg::AckermannDrive & m) {
         std::lock_guard<std::mutex> lock(mutex_);
-        servo_ = std::clamp(static_cast<double>(m.steering_angle), -SERVO_MAX, SERVO_MAX);
-        setpoint_ = m.speed;
+        // the model is forward only: no reverse
+        commands_.push_back({now_, std::clamp(static_cast<double>(m.steering_angle), -SERVO_MAX, SERVO_MAX),
+                             std::max(static_cast<double>(m.speed), 0.0)});
         last_cmd_ = now_;
       });
     sub_arm_ = node_->create_subscription<std_msgs::msg::Bool>(
@@ -222,6 +253,12 @@ public:
     {
       std::lock_guard<std::mutex> lock(mutex_);
       now_ = now;
+      // the commands reach the ESP32 steer_dead after they are sent
+      while (!commands_.empty() && now - commands_.front().t >= p_.steer_dead) {
+        servo_ = commands_.front().servo;
+        setpoint_ = commands_.front().speed;
+        commands_.pop_front();
+      }
       if (armed_ && last_cmd_ >= 0.0 && now - last_cmd_ > CMD_TIMEOUT) {
         setpoint_ -= std::clamp(setpoint_, -SOFTSTOP_RAMP * h, SOFTSTOP_RAMP * h);
       }
@@ -231,11 +268,9 @@ public:
     }
 
     const double d_cmd = interp(servo, p_.steer_cmd, p_.steer_angle);
-    double u_cmd = 0.0, tau_u = p_.brake_lag;
-    if (armed && std::abs(setpoint) >= PID_DEADBAND) {
-      u_cmd = std::clamp(setpoint, -p_.v_max, p_.v_max);
-      tau_u = interp(std::abs(setpoint), p_.speed_lag_v, p_.speed_lag);
-    }
+    servo_angle_ += std::clamp(d_cmd - servo_angle_, -p_.steer_rate * h, p_.steer_rate * h);
+    // duty 0, disarmed or setpoint in the deadband: the motor driver brakes the rear wheels
+    const bool braked = !armed || setpoint < PID_DEADBAND;
     const auto tire = node_->get_parameter("tire").as_double_array();
     p_.mu_f = tire[0];
     p_.b_f = tire[1];
@@ -244,9 +279,13 @@ public:
     p_.c = tire[4];
     p_.lambda = tire[5];
     p_.load_transfer = tire[6];
-    step(node_->get_parameter("mu_scale").as_double(), d_cmd, u_cmd, tau_u, h);
+    step(node_->get_parameter("mu_scale").as_double(), setpoint, braked, h);
     wheel_ema_ += h / WHEEL_EMA_TAU * (x_[U] - wheel_ema_);
     wheel_angle_ += x_[U] / p_.wheel_radius * h;
+    yaw_rates_.push_back({now, x_[R]});
+    while (now - yaw_rates_.front().t > p_.gyro_lag + 0.1) {
+      yaw_rates_.pop_front();
+    }
 
     const double c = std::cos(x_[PSI]), s = std::sin(x_[PSI]);
     model_.SetWorldPoseCmd(ecm, gz::math::Pose3d(x_[X] - p_.lr * c, x_[Y] - p_.lr * s, 0, 0, 0, x_[PSI]));
@@ -254,18 +293,19 @@ public:
     if (info.simTime >= next_publish_) {
       next_publish_ += std::chrono::milliseconds(20);
       publish(rclcpp::Time(std::chrono::duration_cast<std::chrono::nanoseconds>(info.simTime).count(), RCL_ROS_TIME),
-              servo);
+              servo, now);
     }
   }
 
 private:
-  void step(double mu_scale, double d_cmd, double u_cmd, double tau_u, double h)
+  void step(double mu_scale, double setpoint, bool braked, double h)
   {
     State & x = x_;
     if (std::max(x[VX], x[U]) < V_KIN) {
       // the kinematic bicycle, rear axle without slip
-      x[D] += h * (d_cmd - x[D]) / p_.steer_lag;
-      x[U] += h * (u_cmd - x[U]) / tau_u;
+      x[D] += h * (servo_angle_ - x[D]) / p_.steer_lag;
+      x[U] = std::max(x[U] + h * wheel_accel(p_, x[U], setpoint, braked), 0.0);
+      ax_ = ay_ = 0.0;
       x[VX] = x[U];
       x[R] = x[U] * std::tan(x[D]) / (p_.lf + p_.lr);
       x[VY] = p_.lr * x[R];
@@ -274,16 +314,33 @@ private:
       x[Y] += h * (x[VX] * std::sin(x[PSI]) + x[VY] * std::cos(x[PSI]));
       return;
     }
-    const State k1 = deriv(p_, mu_scale, x, d_cmd, u_cmd, tau_u);
-    const State k2 = deriv(p_, mu_scale, add(x, k1, h / 2), d_cmd, u_cmd, tau_u);
-    const State k3 = deriv(p_, mu_scale, add(x, k2, h / 2), d_cmd, u_cmd, tau_u);
-    const State k4 = deriv(p_, mu_scale, add(x, k3, h), d_cmd, u_cmd, tau_u);
+    const State k1 = deriv(p_, mu_scale, x, servo_angle_, setpoint, braked, ax_, ay_);
+    const State k2 = deriv(p_, mu_scale, add(x, k1, h / 2), servo_angle_, setpoint, braked, ax_, ay_);
+    const State k3 = deriv(p_, mu_scale, add(x, k2, h / 2), servo_angle_, setpoint, braked, ax_, ay_);
+    const State k4 = deriv(p_, mu_scale, add(x, k3, h), servo_angle_, setpoint, braked, ax_, ay_);
+    // body frame acceleration at the start of this step, for the load transfer of the next
+    ax_ = k1[VX] - x[VY] * x[R];
+    ay_ = k1[VY] + x[VX] * x[R];
     for (int i = 0; i < N; i++) {
       x[i] += h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
     }
+    x[U] = std::max(x[U], 0.0);
   }
 
-  void publish(const rclcpp::Time & stamp, double servo)
+  // the true yaw rate gyro_lag ago, between the two steps around it
+  double yaw_rate_then(double now) const
+  {
+    const double then = now - p_.gyro_lag;
+    for (size_t i = 1; i < yaw_rates_.size(); i++) {
+      if (yaw_rates_[i].t >= then) {
+        const auto & a = yaw_rates_[i - 1], & b = yaw_rates_[i];
+        return a.r + (b.r - a.r) * std::clamp((then - a.t) / (b.t - a.t), 0.0, 1.0);
+      }
+    }
+    return yaw_rates_.front().r;
+  }
+
+  void publish(const rclcpp::Time & stamp, double servo, double now)
   {
     // acceleration over the last 20 ms at the IMU, body frame
     const double c = std::cos(x_[PSI]), s = std::sin(x_[PSI]), r = x_[R];
@@ -311,7 +368,7 @@ private:
     imu.orientation_covariance[0] = -1.0;
     imu.angular_velocity.x = gyro_sd * noise_(rng_);
     imu.angular_velocity.y = gyro_sd * noise_(rng_);
-    imu.angular_velocity.z = r + gyro_sd * noise_(rng_);
+    imu.angular_velocity.z = yaw_rate_then(now) / p_.gyro_scale + gyro_sd * noise_(rng_);
     imu.linear_acceleration.x = ay + accel_sd * noise_(rng_);
     imu.linear_acceleration.y = -ax + accel_sd * noise_(rng_);
     imu.linear_acceleration.z = accel_sd * noise_(rng_);
@@ -347,12 +404,24 @@ private:
   double rho_x_, rho_y_;
   double wheel_ema_ = 0.0, wheel_angle_ = 0.0;     // m/s as /joint_states reports it, rad
   double vxw_prev_ = 0.0, vyw_prev_ = 0.0, r_prev_ = 0.0;
+  double servo_angle_ = 0.0;      // rad, wheel angle the servo turns to (rate limited)
+  double ax_ = 0.0, ay_ = 0.0;    // m/s2, body frame acceleration of the last step
+  struct YawRate
+  {
+    double t, r;
+  };
+  std::deque<YawRate> yaw_rates_;
   std::chrono::steady_clock::duration next_publish_{0};
   std::mt19937 rng_;
   std::normal_distribution<double> noise_;
 
   // the ESP32 state, written by the ROS callbacks
+  struct Command
+  {
+    double t, servo, speed;
+  };
   std::mutex mutex_;
+  std::deque<Command> commands_;    // sent, not yet at the ESP32
   double servo_ = 0.0;        // rad, servo command
   double setpoint_ = 0.0;     // m/s, both rear wheels
   bool armed_ = false;

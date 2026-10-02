@@ -47,6 +47,8 @@ FIELDS = {
     '/drift/state': lambda m: dict(zip(['s', 'n', 'e_psi', 'vx', 'vy', 'r', 'd', 'u', 'd_cmd', 'u_cmd'], m.data)),
     '/drift/mu': lambda m: {'mu': m.data},
     '/handbrake/state': lambda m: dict(zip(['phase', 'heading', 'r', 'u', 'steer', 'vx', 'vy', 'box_far', 'box_b'], m.data)),
+    '/gap/state': lambda m: dict(zip(['phase', 'heading', 'heading_now', 'r', 'u', 'steer', 'vx', 'vy', 'r_model', 'x', 'y',
+                                      'tick_ms'], m.data)),
     '/scan': lambda m: {'stamp': m.header.stamp.sec + m.header.stamp.nanosec * 1e-9, 'angle_min': m.angle_min,
                         'angle_increment': m.angle_increment, 'ranges': list(m.ranges)},
 }
