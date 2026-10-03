@@ -14,6 +14,7 @@ def generate_launch_description():
         DeclareLaunchArgument('track', default_value='room_track'),    # maps/<track>.csv
         DeclareLaunchArgument('speed_scale', default_value='1.0'),
         DeclareLaunchArgument('laps', default_value='3'),
+        DeclareLaunchArgument('open_path', default_value='false'),     # a path with an end (gymkhana)
         DeclareLaunchArgument('mu_scale', default_value='1.0'),        # floor friction the NMPC assumes
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
@@ -28,6 +29,7 @@ def generate_launch_description():
                 {'track_file': PathJoinSubstitution([bringup, 'maps', [LaunchConfiguration('track'), '.csv']]),
                  'speed_scale': ParameterValue(LaunchConfiguration('speed_scale'), value_type=float),
                  'laps': ParameterValue(LaunchConfiguration('laps'), value_type=int),
+                 'open_path': ParameterValue(LaunchConfiguration('open_path'), value_type=bool),
                  'mu_scale': ParameterValue(LaunchConfiguration('mu_scale'), value_type=float)},
             ],
         ),

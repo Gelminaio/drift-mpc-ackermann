@@ -21,7 +21,8 @@ def generate_launch_description():
              for name in ['target', 'kick_ahead', 'kick_left', 'side_in', 'sweep', 'slide_ref', 'slide_turn']},
             {'slide_bisect': ParameterValue(LaunchConfiguration('slide_bisect'), value_type=bool)},
             {'donut_turns': ParameterValue(LaunchConfiguration('donut_turns'), value_type=int),
-             'donut_exit': ParameterValue(LaunchConfiguration('donut_exit'), value_type=float)},
+             'donut_exit': ParameterValue(LaunchConfiguration('donut_exit'), value_type=float),
+             'donut_only': ParameterValue(LaunchConfiguration('donut_only'), value_type=bool)},
         ],
     )
 
@@ -36,6 +37,7 @@ def generate_launch_description():
         DeclareLaunchArgument('slide_turn', default_value='36.4'),     # deg turned in the slide, 0: the model
         DeclareLaunchArgument('donut_turns', default_value='0'),       # donut before the parking: turns
         DeclareLaunchArgument('donut_exit', default_value='180.0'),    # deg, its exit against the start
+        DeclareLaunchArgument('donut_only', default_value='false'),    # the donut alone, then the localization set back
         DeclareLaunchArgument('use_sim_time', default_value='false'),  # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         gap,
