@@ -50,7 +50,9 @@ constexpr double T_UPDATES = 0.3;    // s between the localization's updates at 
 constexpr int UPDATES = 6;
 constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
 constexpr double SLIDE_STEER_MIN = -0.15;   // countersteered further the car swings back (hbn runs)
-constexpr double LOOKAHEAD = 0.4;    // m, pure pursuit on the line of the approach
+constexpr double LOOKAHEAD = 0.3;    // m, pure pursuit on the line of the approach
+constexpr double KICK_ALIGN = 0.087; // rad, the car on the line at the kick (~0.3 cm of stop per deg off): else stop
+constexpr double KICK_OFF = 0.03;    // m
 constexpr double WHEEL_SLIP = 0.97;  // car over wheels at the launch (0.94-1.00, identification.ipynb)
 constexpr double HALF_WIDTH = 0.10;  // m, the car to the outside of the wheels
 constexpr double ROW_BREAK = 0.10;   // m between points of one box's row
@@ -147,6 +149,8 @@ public:
     // donut before the parking: turns (0: none), braked to end at donut_exit (deg, against the start heading)
     donut_turns_ = declare_parameter("donut_turns", 0);
     donut_exit_ = declare_parameter("donut_exit", 180.0) * M_PI / 180;
+    // deg the car turns from when the donut's brake acts to the stop: 33.3 and 28.8 on the car (gymk_5, gymk_7)
+    donut_slide_ = declare_parameter("donut_slide", 31.0) * M_PI / 180;
     donut_only_ = declare_parameter("donut_only", false);
     collecting_ = donut_turns_ == 0;
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
@@ -572,7 +576,7 @@ private:
         if (brake_timer_ && !brake_timer_->is_canceled()) {
           break;    // the brake goes before the next step
         }
-        const double due = (donut_turns_ * 2 * M_PI + donut_exit_ - slide_turn_ - heading_now_) / std::max(model_.r, 0.1) - steer_dead_;
+        const double due = (donut_turns_ * 2 * M_PI + donut_exit_ - donut_slide_ - heading_now_) / std::max(model_.r, 0.1) - steer_dead_;
         if (t > T_DONUT * donut_turns_ + T_KICK) {
           RCLCPP_ERROR(get_logger(), "heading %.0f deg after %.1f s of donut: stop", heading_now_ * 180 / M_PI, t);
           next(Phase::DONE, now);
@@ -624,11 +628,16 @@ private:
         const double ty = -std::sin(heading_) * LOOKAHEAD - std::cos(heading_) * off;
         const double d = std::atan(2 * (lf_ + lr_) * ty / (LOOKAHEAD * LOOKAHEAD + off * off));
         const double steer = interp(d, steer_angle_, steer_cmd_);
-        // where the car would stop kicking now, along the line
-        const double stop_x = x_ + std::cos(heading_) * kick_ahead_ - std::sin(heading_) * kick_left_;
-        if (stop_x >= mid_x_) {
+        // where the car would stop kicking now, along the line: kicked on the line, the stop follows from the kick
+        // point (turned with the car's heading it moved the wrong way: gymk_9, sim_gym3)
+        if (x_ + kick_ahead_ >= mid_x_) {
           if (t < T_RAMP) {
             RCLCPP_ERROR(get_logger(), "kick at %.3f m, before full speed: stop", x_);
+            next(Phase::DONE, now);
+            break;
+          }
+          if (std::abs(heading_) > KICK_ALIGN || std::abs(off) > KICK_OFF) {
+            RCLCPP_ERROR(get_logger(), "not on the line at the kick (%.3f m off, %.1f deg): stop", off, heading_ * 180 / M_PI);
             next(Phase::DONE, now);
             break;
           }
@@ -707,7 +716,7 @@ private:
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, kick_speed_, target_, kick_ahead_, kick_left_, side_in_, sweep_, slide_ref_, gap_min_, gap_max_;
   bool slide_bisect_, collecting_, donut_only_, finished_ = false;
-  double slide_turn_, donut_exit_;
+  double slide_turn_, donut_exit_, donut_slide_;
   int64_t donut_turns_;
 
   Phase phase_ = Phase::WAIT;
