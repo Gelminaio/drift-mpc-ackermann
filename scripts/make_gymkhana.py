@@ -17,7 +17,8 @@ V_MAX = 1.1      # m/s, the wheels reach 1.16
 START = 0.05     # m, s of the ring where the car starts at rest: the start mark
 DONUT = 6.65     # m, s of the ring where the first path stops: the corner after the far straight, ~0.6 m clear
 R_LAST = 0.4     # m, the way back takes the last corner tighter than the ring (0.6) to be on the near straight sooner
-STOP = 0.1       # m before the start mark where the way back stops, on the line of the near straight
+STOP = -0.15     # m before the start mark where the way back stops (after it): 0.35 m on the line of the near straight
+V_FINAL, FINAL = 0.3, 0.3    # m/s over the last m of each path: the NMPC does not follow a hard braking to the end
 V_END = 0.25     # m/s at the ends, then braked
 DS = 0.02
 if len(sys.argv) > 1:
@@ -92,6 +93,7 @@ def path(s_from, s_to, name):
     s_path = np.r_[0, np.cumsum(step)]
     # speed: lateral limit, from rest, to V_END at the end
     v = np.minimum(V_MAX, np.sqrt(A_LAT / np.maximum(np.abs(kappa), 1e-9)))
+    v[s_path > s_path[-1] - FINAL] = np.minimum(v[s_path > s_path[-1] - FINAL], V_FINAL)
     v[0], v[-1] = 0.0, V_END
     for i in range(1, len(v)):
         v[i] = min(v[i], np.sqrt(v[i - 1] ** 2 + 2 * A_LONG * step[i - 1]))
