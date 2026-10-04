@@ -453,24 +453,26 @@ private:
   void relocalize(const rclcpp::Time & now)
   {
     if (updates_ == 0) {
-      RCLCPP_INFO(get_logger(), "donut braked at %.1f deg, stopped at %.1f deg (exit %.1f)", heading_brake_ * 180 / M_PI,
-        heading_ * 180 / M_PI, (donut_turns_ * 2 * M_PI + donut_exit_) * 180 / M_PI);
-      if (!std::isnan(start_yaw_)) {
-        geometry_msgs::msg::PoseWithCovarianceStamped p;
-        p.header.stamp = now;
-        p.header.frame_id = "map";
-        p.pose.pose.position.x = start_x_;
-        p.pose.pose.position.y = start_y_;
-        p.pose.pose.orientation.z = std::sin((start_yaw_ + heading_) / 2);
-        p.pose.pose.orientation.w = std::cos((start_yaw_ + heading_) / 2);
-        p.pose.covariance[0] = p.pose.covariance[7] = 0.25 * 0.25;  // the donut moves the car up to ~0.25 m
-        p.pose.covariance[35] = 0.05 * 0.05;
-        pub_initial_->publish(p);
-      }
+      RCLCPP_INFO(get_logger(), "donut braked at %.1f deg, stopped at %.1f deg (exit %.1f); localization set back to "
+        "(%.3f, %.3f, %.1f deg)", heading_brake_ * 180 / M_PI, heading_ * 180 / M_PI,
+        (donut_turns_ * 2 * M_PI + donut_exit_) * 180 / M_PI, start_x_, start_y_, (start_yaw_ + heading_) * 180 / M_PI);
+    }
+    if (updates_ < 3) {
+      // three times: the localization takes it best effort
+      geometry_msgs::msg::PoseWithCovarianceStamped p;
+      p.header.stamp = now;
+      p.header.frame_id = "map";
+      p.pose.pose.position.x = start_x_;
+      p.pose.pose.position.y = start_y_;
+      p.pose.pose.orientation.z = std::sin((start_yaw_ + heading_) / 2);
+      p.pose.pose.orientation.w = std::cos((start_yaw_ + heading_) / 2);
+      p.pose.covariance[0] = p.pose.covariance[7] = 0.25 * 0.25;    // the donut moves the car up to ~0.25 m
+      p.pose.covariance[35] = 0.05 * 0.05;
+      pub_initial_->publish(p);
       last_update_ = now;
-      updates_ = 1;
+      updates_++;
     } else if ((now - last_update_).seconds() > T_UPDATES) {
-      if (updates_ <= UPDATES) {
+      if (updates_ < 3 + UPDATES) {
         nomotion_->async_send_request(std::make_shared<std_srvs::srv::Empty::Request>());
       } else {
         finished_ = true;
@@ -551,13 +553,21 @@ private:
         send(0.0, 0.0, now);
         if (t > T_ARM) {
           if (donut_turns_ > 0) {
+            // the newest localization correction on the newest odometry, as the NMPC: map -> base_footprint at
+            // one time fails while the corrections are dated ahead
             try {
-              const auto p = tf_buffer_->lookupTransform("map", "base_footprint", tf2::TimePointZero).transform;
-              start_x_ = p.translation.x;
-              start_y_ = p.translation.y;
-              start_yaw_ = 2 * std::atan2(p.rotation.z, p.rotation.w);
-            } catch (const tf2::TransformException &) {
-              start_yaw_ = NAN;    // no localization: none to set back
+              const auto c = tf_buffer_->lookupTransform("map", "odom", tf2::TimePointZero).transform;
+              const auto o = tf_buffer_->lookupTransform("odom", "base_footprint", tf2::TimePointZero).transform;
+              const double yc = 2 * std::atan2(c.rotation.z, c.rotation.w);
+              start_x_ = c.translation.x + std::cos(yc) * o.translation.x - std::sin(yc) * o.translation.y;
+              start_y_ = c.translation.y + std::sin(yc) * o.translation.x + std::cos(yc) * o.translation.y;
+              start_yaw_ = yc + 2 * std::atan2(o.rotation.z, o.rotation.w);
+            } catch (const tf2::TransformException & e) {
+              if (donut_only_) {
+                RCLCPP_ERROR(get_logger(), "no localization before the donut (%s): stop", e.what());
+                next(Phase::DONE, now);
+                break;
+              }
             }
             heading_ = 0.0;
             model_ = {0.0, 0.0, r_, 0.0, 0.0, 0.0, 0.0};
