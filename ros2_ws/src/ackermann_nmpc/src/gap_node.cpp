@@ -184,8 +184,8 @@ private:
   // at rest: points left of the car from a few scans
   void on_scan(const sensor_msgs::msg::LaserScan & m)
   {
-    if (!collecting_) {
-      return;
+    if (!collecting_ || scans_ >= 5) {
+      return;    // five scans at rest: more only slow the search down
     }
     if (std::isnan(lidar_x_)) {
       try {
