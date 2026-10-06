@@ -5,8 +5,8 @@ from scipy.interpolate import CubicSpline
 
 # the gymkhana's two open paths on the racing line of maps/room (room_track.csv): from rest on the start mark, past
 # the boxes, round the ring with a slalom round CONES cones on the far straight, to a stop in the corner after it
-# (DONUT: the donut there); then from there to where the parking starts, past the start mark. Speed profile from the
-# lateral and the longitudinal grip, from rest to rest. Run from the repo root.
+# (DONUT: the donut there); then from there to the start mark (the parking). Speed profile from the lateral and the
+# longitudinal grip, from rest to rest. Run from the repo root.
 # make_gymkhana.py [cones spacing amplitude a_lat] -> maps/room_gymkhana.csv, room_gymkhana_back.csv, room_gymkhana_cones.csv
 MAPS = 'ros2_ws/src/ackermann_bringup/maps'
 CONES, SPACING, AMPLITUDE = 2, 0.9, 0.2     # m between the cones, m the line passes beside them
@@ -15,13 +15,10 @@ A_LAT = 2.0      # m/s2, the slalom near the limit of the tiles (~0.26 g); the N
 A_LONG = 1.5     # m/s2
 V_MAX = 1.1      # m/s, the wheels reach 1.16
 START = 0.05     # m, s of the ring where the car starts at rest: the start mark
-TAPE = (3.010, 0.350, np.radians(-45.9))    # the start mark on the map (AMCL's initial pose): the boxes are set from it
 DONUT = 6.65     # m, s of the ring where the first path stops: the corner after the far straight, ~0.6 m clear
-R_LAST = 0.45    # m, the way back takes the last corner tighter than the ring (0.6) to be on the parking's line sooner
-PAST = 0.15      # m past the start mark where the way back stops
-LEFT = 0.06      # m left of the start mark's line, on the parking's: the boxes 0.36 m left of it, kick_left 0.42
-V_FINAL, FINAL = 0.3, 0.3    # m/s over the last m of the lap: the NMPC does not follow a hard braking to the end
-V_BACK, FINAL_BACK = 0.35, 1.0    # and of the way back, the end of its corner too: the parking wants the car settled
+R_LAST = 0.4     # m, the way back takes the last corner tighter than the ring (0.6) to be on the near straight sooner
+STOP = -0.15     # m before the start mark where the way back stops (after it): 0.35 m on the line of the near straight
+V_FINAL, FINAL = 0.3, 0.3    # m/s over the last m of each path: the NMPC does not follow a hard braking to the end
 V_END = 0.25     # m/s at the ends, then braked
 DS = 0.02
 if len(sys.argv) > 1:
@@ -60,29 +57,26 @@ SHORT = 7.6      # m, s on the short straight before the last corner where the w
 
 
 def back_end():
-    # the end of the way back: from the ring's short straight on to the vertex V of its last corner with the parking's
-    # line (along the start mark's: the ring's near straight is 3.4 deg off it), the arc of R_LAST between them, to PAST
+    # the end of the way back: from the ring's short straight on to R_LAST before the vertex V of its last corner,
+    # the arc of R_LAST, the near straight's line to STOP before the start mark
     p1, h1 = line(7.45, 7.75)
-    p0, h0 = np.array(TAPE[:2]), TAPE[2]
+    p0, h0 = line(0.1, 1.9)
     d1, d0 = np.array([np.cos(h1), np.sin(h1)]), np.array([np.cos(h0), np.sin(h0)])
-    p0 = p0 + LEFT * np.array([-d0[1], d0[0]])
     k = np.linalg.solve(np.c_[d1, -d0], p0 - p1)
     v = p1 + k[0] * d1                                                     # the vertex
-    turn = np.remainder(h0 - h1, 2 * np.pi)
-    t = R_LAST * np.tan(turn / 2)                                          # from V to where the arc meets each line
     bx, by, _ = base(SHORT)
     a0 = np.dot([bx, by] - v, d1)                                          # where the way back leaves the ring
-    a = np.linspace(a0, -t, max(2, round((-t - a0) / DS) + 1))[1:]
-    c = v - t * d1 + R_LAST * np.array([-d1[1], d1[0]])
-    th = np.linspace(0, turn, round(R_LAST * turn / DS) + 1)[1:]
-    end = np.dot(p0 - v, d0) + PAST
-    b = np.linspace(t, end, max(2, round((end - t) / DS) + 1))[1:]
+    a = np.linspace(a0, -R_LAST, max(2, round((-R_LAST - a0) / DS) + 1))[1:]
+    c = v - R_LAST * d1 + R_LAST * np.array([-d1[1], d1[0]])
+    th = np.linspace(0, np.pi / 2, round(R_LAST * np.pi / 2 / DS) + 1)[1:]
+    start = np.dot(np.array(base(START)[:2]) - v, d0)                     # the start mark along the near straight
+    b = np.linspace(R_LAST, start - STOP, max(2, round((start - STOP - R_LAST) / DS) + 1))[1:]
     return np.vstack([np.c_[v[0] + a * d1[0], v[1] + a * d1[1], np.full(len(a), h1)],
                       np.c_[c[0] + R_LAST * np.cos(h1 - np.pi / 2 + th), c[1] + R_LAST * np.sin(h1 - np.pi / 2 + th), h1 + th],
-                      np.c_[v[0] + b * d0[0], v[1] + b * d0[1], np.full(len(b), h1 + turn)]]).T
+                      np.c_[v[0] + b * d0[0], v[1] + b * d0[1], np.full(len(b), h1 + np.pi / 2)]]).T
 
 
-def path(s_from, s_to, name, final, v_final):
+def path(s_from, s_to, name):
     s = np.arange(s_from, s_to, DS)
     bx, by, byaw = base(s)
     if s_to > length:
@@ -99,7 +93,7 @@ def path(s_from, s_to, name, final, v_final):
     s_path = np.r_[0, np.cumsum(step)]
     # speed: lateral limit, from rest, to V_END at the end
     v = np.minimum(V_MAX, np.sqrt(A_LAT / np.maximum(np.abs(kappa), 1e-9)))
-    v[s_path > s_path[-1] - final] = np.minimum(v[s_path > s_path[-1] - final], v_final)
+    v[s_path > s_path[-1] - FINAL] = np.minimum(v[s_path > s_path[-1] - FINAL], V_FINAL)
     v[0], v[-1] = 0.0, V_END
     for i in range(1, len(v)):
         v[i] = min(v[i], np.sqrt(v[i - 1] ** 2 + 2 * A_LONG * step[i - 1]))
@@ -113,8 +107,8 @@ def path(s_from, s_to, name, final, v_final):
 
 
 print(f'{CONES} cones {SPACING} m apart, {AMPLITUDE} m beside them')
-path(START, DONUT, 'gymkhana', FINAL, V_FINAL)
-path(DONUT, length + START, 'gymkhana_back', FINAL_BACK, V_BACK)
+path(START, DONUT, 'gymkhana')
+path(DONUT, length + START, 'gymkhana_back')
 cx, cy, _ = base(s_cones)
 np.savetxt(f'{MAPS}/room_gymkhana_cones.csv', np.c_[cx, cy], delimiter=',', fmt='%.3f', header='x,y', comments='')
 for i, (a, b) in enumerate(zip(cx, cy)):
