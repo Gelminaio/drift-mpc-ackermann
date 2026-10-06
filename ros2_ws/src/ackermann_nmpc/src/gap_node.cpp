@@ -41,7 +41,8 @@ constexpr double DT_MODEL = 0.005;   // s, model steps in the prediction
 constexpr double HORIZON = 1.6;      // s, longest prediction
 constexpr double T_RAMP = 1.0;       // s from rest to speed
 constexpr double T_ARM = 0.5;        // s armed at rest before starting
-constexpr double T_POSE = 2.0;       // s more at rest waiting for the localization before the donut
+constexpr double T_POSE = 8.0;       // s more at rest waiting for the localization before the donut: a new node on
+                                     // the Pi gets the second of its transforms 3-6 s late (DDS discovery)
 constexpr double T_KICK = 2.0;       // s kicking without braking: stop
 constexpr double T_SLIDE = 1.5;      // s from the brake to the end
 constexpr double T_DONUT = 1.8;      // s per turn of the donut: stop
@@ -563,9 +564,12 @@ private:
               start_x_ = c.translation.x + std::cos(yc) * o.translation.x - std::sin(yc) * o.translation.y;
               start_y_ = c.translation.y + std::sin(yc) * o.translation.x + std::cos(yc) * o.translation.y;
               start_yaw_ = yc + 2 * std::atan2(o.rotation.z, o.rotation.w);
+              if (t > T_ARM + 0.1) {
+                RCLCPP_INFO(get_logger(), "localization after %.1f s", t);
+              }
             } catch (const tf2::TransformException & e) {
               if (donut_only_ && t < T_ARM + T_POSE) {
-                break;    // a new node hears the localization's transform after a while (gymk_22)
+                break;
               }
               if (donut_only_) {
                 RCLCPP_ERROR(get_logger(), "no localization before the donut (%s): stop", e.what());
