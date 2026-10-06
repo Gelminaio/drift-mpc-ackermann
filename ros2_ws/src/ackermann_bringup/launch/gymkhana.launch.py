@@ -45,7 +45,7 @@ def generate_launch_description():
         DeclareLaunchArgument('donut_turns', default_value='1'),
         DeclareLaunchArgument('kick_ahead', default_value='0.30'),
         DeclareLaunchArgument('kick_left', default_value='0.42'),
-        DeclareLaunchArgument('sweep', default_value='0.12'),
+        DeclareLaunchArgument('sweep', default_value='0.15'),          # the tail swept nearer box B on this floor (gymk_15-23)
         DeclareLaunchArgument('slide_turn', default_value='36.4'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),  # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
