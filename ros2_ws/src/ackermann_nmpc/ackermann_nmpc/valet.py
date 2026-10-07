@@ -5,8 +5,9 @@ from scipy.spatial import cKDTree
 
 # Park anywhere: the two boxes among the lidar points the map does not explain, the line their sides share and the
 # gap along it; where the parking starts (on its line, the boxes on the left); the approach there as the shortest
-# arc-straight-arc path clear of the walls and the boxes, with the gymkhana's speed profile. Poses (x, y, yaw) on
-# the map, the rear axle.
+# arc-straight-arc path clear of the walls and the boxes, with the gymkhana's speed profile, or to the line further
+# along when that start cannot be reached driving forward, the car then backing up. Poses (x, y, yaw) on the map,
+# the rear axle.
 NEW = 0.10           # m from the map's walls: a point of something new
 LINK = 0.06          # m between two points of one object
 SIZE = (0.15, 0.70)  # m, the extent of a box
@@ -18,6 +19,7 @@ MARGIN = 0.05        # m between the car's outline and anything on the approach
 R = 0.5              # m, the approach's turns
 DS = 0.02
 V_MAX, A_LAT, A_LONG, V_FINAL, FINAL, V_END = 0.8, 1.5, 1.0, 0.3, 0.3, 0.25
+REVERSE_COST = 2.0   # a m backed up (0.3 m/s, no lidar on the boxes behind) counts as 2 m forward
 
 
 def new_points(points, wall_dist):
@@ -161,16 +163,23 @@ def profile(path):
     return s, v
 
 
-def plan(car, goal, obstacles, straight=0.3):
-    # the shortest clear path from the car to goal, its last straight m on the parking's line: s, x, y, yaw, kappa, v
-    before = goal - np.array([np.cos(goal[2]) * straight, np.sin(goal[2]) * straight, 0])
-    found = []
-    for turns, lengths in words(car, before):
-        path = sample(car, turns + (0,), lengths + (straight / R,))
-        if np.hypot(*(path[-1, :2] - goal[:2])) < 0.01 and clear(path, obstacles):
-            found.append(path)
-    if not found:
-        return None
-    path = min(found, key=len)
+def plan(car, goal, obstacles, straight=0.3, reverse_max=3.0, reverse_cost=REVERSE_COST):
+    # the clear path from the car to goal, its last straight m on the parking's line, or to a point further along
+    # the line from where gap_node backs up straight to goal (the leg clear as well): the one with the least length
+    # plus reverse_cost per m backed up. Returns the path (s, x, y, yaw, kappa, v) and the m to back up, or None, 0
+    along = np.array([np.cos(goal[2]), np.sin(goal[2]), 0.0])
+    best, best_cost = None, np.inf
+    for back in np.r_[0.0, np.arange(0.3, reverse_max + 1e-9, 0.2)]:
+        end = goal + back * along
+        if back > 0 and not clear(np.array([[*(goal + a * along)[:2], goal[2], 0.0] for a in np.arange(0, back + DS / 2, DS)]), obstacles):
+            continue
+        for turns, lengths in words(car, end - straight * along):
+            path = sample(car, turns + (0,), lengths + (straight / R,))
+            cost = len(path) * DS + reverse_cost * back
+            if cost < best_cost and np.hypot(*(path[-1, :2] - end[:2])) < 0.01 and clear(path, obstacles):
+                best, best_cost = (path, back), cost
+    if best is None:
+        return None, 0.0
+    path, back = best
     s, v = profile(path)
-    return np.c_[s, path[:, 0], path[:, 1], np.unwrap(path[:, 2]), path[:, 3], v]
+    return np.c_[s, path[:, 0], path[:, 1], np.unwrap(path[:, 2]), path[:, 3], v], back

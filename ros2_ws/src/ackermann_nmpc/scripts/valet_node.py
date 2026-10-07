@@ -16,9 +16,9 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from ackermann_nmpc import valet
 
 # Park anywhere, the plan: at rest, the localization and five scans; the two boxes the map does not have, the gap
-# between them and the approach to where the parking starts, written as a path for nmpc_node (track_file). Exits 0
-# with a path, 2 when the car already stands where gap_node can start, 1 without (no localization, no gap, no clear
-# approach)
+# between them and the approach to where the parking starts, written as a path for nmpc_node (track_file), and the m
+# gap_node backs up first (reverse_file; 0 unless that start is out of reach driving forward). Exits 0 with a path, 2
+# when the car already stands where gap_node can start, 1 without (no localization, no gap, no clear approach)
 SCANS = 5
 T_MAX = 10.0    # s to get the localization and the scans
 THERE = (np.radians(10), 0.20, 0.50, 0.35, 1.20)    # as gap_node starts: heading off the faces, the faces left, the kick ahead
@@ -33,10 +33,12 @@ class ValetNode(Node):
         super().__init__('valet')
         self.map_file = self.declare_parameter('map', '').value
         self.out = self.declare_parameter('path_file', '/tmp/valet_path.csv').value
+        self.reverse_file = self.declare_parameter('reverse_file', '/tmp/valet_reverse.txt').value
         # as the gap node plans from where the approach ends
         self.kick = [self.declare_parameter(n, v).value for n, v in
                      (('kick_ahead', 0.30), ('kick_left', 0.42), ('sweep', 0.12), ('side_in', 0.02))]
         self.runup = self.declare_parameter('runup', 0.6).value    # m from the approach's end to the kick
+        self.reverse_cost = self.declare_parameter('reverse_cost', valet.REVERSE_COST).value
         self.tf = Buffer()
         TransformListener(self.tf, self)
         self.points, self.scans, self.pose, self.ok = [], 0, None, 1    # the exit code
@@ -102,10 +104,11 @@ class ValetNode(Node):
         if off < THERE[0] and THERE[1] < -across < THERE[2] and THERE[3] < kick < THERE[4]:
             self.get_logger().info(f'gap {g_to - g_from:.3f} m, the kick {kick:.2f} m ahead, the faces {-across:.2f} m left: '
                                    'the parking starts from here')
+            open(self.reverse_file, 'w').write('0.0\n')
             self.ok = 2
             return
         goal = valet.parking_start(c, d, g_from, g_to, *self.kick, self.runup)
-        path = valet.plan(self.pose, goal, np.vstack([walls, new]))
+        path, back = valet.plan(self.pose, goal, np.vstack([walls, new]), reverse_cost=self.reverse_cost)
         self.get_logger().info(
             f'gap {g_to - g_from:.3f} m, its line at ({c[0]:.2f}, {c[1]:.2f}) heading {np.degrees(np.arctan2(d[1], d[0])):.1f} deg; '
             f'the parking starts at ({goal[0]:.2f}, {goal[1]:.2f}); from ({self.pose[0]:.2f}, {self.pose[1]:.2f})')
@@ -113,7 +116,8 @@ class ValetNode(Node):
             self.get_logger().error('no clear approach: stop')
             return
         np.savetxt(self.out, path, delimiter=',', fmt='%.4f', header='s,x,y,yaw,kappa,v', comments='')
-        self.get_logger().info(f'approach {path[-1, 0]:.2f} m in {self.out}')
+        open(self.reverse_file, 'w').write(f'{back:.3f}\n')
+        self.get_logger().info(f'approach {path[-1, 0]:.2f} m in {self.out}' + (f', then {back:.2f} m backing up' if back else ''))
         self.ok = 0
 
 

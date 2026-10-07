@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <fstream>
 #include <vector>
 
 #include <ackermann_msgs/msg/ackermann_drive.hpp>
@@ -53,6 +54,9 @@ constexpr int UPDATES = 6;
 constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
 constexpr double SLIDE_STEER_MIN = -0.15;   // countersteered further the car swings back (hbn runs)
 constexpr double LOOKAHEAD = 0.3;    // m, pure pursuit on the line of the approach
+constexpr double REVERSE_SPEED = 0.3;   // m/s backwards along the line before the run-up (reverse_file)
+constexpr double REVERSE_GAIN = 2.0;    // 1/s, the heading held while backing up
+constexpr double REVERSE_STOP = 0.02;   // m the car rolls on after the brake at REVERSE_SPEED
 constexpr double KICK_ALIGN = 0.087; // rad, the car on the line at the kick (~0.3 cm of stop per deg off): else stop
 constexpr double KICK_OFF = 0.03;    // m
 constexpr double WHEEL_SLIP = 0.97;  // car over wheels at the launch (0.94-1.00, identification.ipynb)
@@ -153,7 +157,16 @@ public:
     // deg the car turns from when the donut's brake acts to the stop: 33.3 and 28.8 on the car (gymk_5, gymk_7)
     donut_slide_ = declare_parameter("donut_slide", 31.0) * M_PI / 180;
     donut_only_ = declare_parameter("donut_only", false);
+    // park anywhere: m to back up along the line first, from the file valet_node writes (empty: none)
+    const std::string reverse_file = declare_parameter("reverse_file", "");
+    if (!reverse_file.empty()) {
+      std::ifstream(reverse_file) >> reverse_;
+    }
     collecting_ = donut_turns_ == 0;
+    // backing up first: the boxes where they will be seen from the run-up, now reverse m further behind (the nearest
+    // line was something ahead of the car when the window reached it: sim_valet_r3b)
+    window_back_ = -0.3 - reverse_;
+    window_front_ = 2.5 - reverse_;
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
     const double g = 9.81, l = lf_ + lr_;
@@ -199,7 +212,7 @@ private:
       if (std::isfinite(m.ranges[i])) {
         const double a = m.angle_min + i * m.angle_increment;
         const double x = m.ranges[i] * std::cos(a) + lidar_x_, y = m.ranges[i] * std::sin(a);
-        if (x > -0.3 && x < 2.5 && y > 0.1 && y < 1.2) {
+        if (x > window_back_ && x < window_front_ && y > 0.1 && y < 1.2) {
           left_x_.push_back(x);
           left_y_.push_back(y);
         }
@@ -208,9 +221,8 @@ private:
     scans_++;
   }
 
-  // the gap: the side of the boxes is the nearest line of points, at the angle where most points line up on it;
-  // along it two rows, the gap between. In the frame of that line: x along it, y to its left
-  bool find_gap()
+  // the side of the boxes: the nearest line of points, at the angle where most points line up on it
+  bool face_line()
   {
     if (left_y_.size() < 50) {
       return false;
@@ -244,8 +256,18 @@ private:
       }
     }
     face_angle_ = std::atan((n * sxy - sx * sy) / (n * sxx - sx * sx));
-    std::vector<double> fx(ys.size()), fy(ys.size());
-    for (size_t i = 0; i < ys.size(); i++) {
+    return true;
+  }
+
+  // the gap: along the side of the boxes two rows, the gap between. In the frame of that line: x along it, y to its
+  // left
+  bool find_gap()
+  {
+    if (!face_line()) {
+      return false;
+    }
+    std::vector<double> fx(left_x_.size()), fy(left_x_.size());
+    for (size_t i = 0; i < fx.size(); i++) {
       fx[i] = std::cos(face_angle_) * left_x_[i] + std::sin(face_angle_) * left_y_[i];
       fy[i] = -std::sin(face_angle_) * left_x_[i] + std::cos(face_angle_) * left_y_[i];
     }
@@ -537,10 +559,10 @@ private:
     }
     switch (phase_) {
       case Phase::WAIT:
-        if (bias_samples_.size() >= 50 && (donut_turns_ > 0 || scans_ >= 5) && pub_drive_->get_subscription_count() > 0 &&
+        if (bias_samples_.size() >= 50 && (!collecting_ || scans_ >= 5) && pub_drive_->get_subscription_count() > 0 &&
           pub_arm_->get_subscription_count() > 0)
         {
-          if (donut_turns_ == 0 && !plan_gap()) {
+          if (reverse_ > 0.0 ? !face_line() : collecting_ && !plan_gap()) {
             next(Phase::DONE, now);
             break;
           }
@@ -582,12 +604,41 @@ private:
             history_.clear();
             next(Phase::DONUT, now);
             send(kick_speed_, steer_cmd_.back(), now);
+          } else if (reverse_ > 0.0) {
+            heading_ = -face_angle_;    // the frame of the boxes' side: backing up parallel to it
+            x_ = 0.0;
+            left_x_.clear();
+            left_y_.clear();
+            scans_ = 0;
+            collecting_ = false;
+            window_back_ = -0.3;
+            window_front_ = 2.5;
+            RCLCPP_INFO(get_logger(), "backing up %.2f m along the boxes (at %.1f deg)", reverse_, face_angle_ * 180 / M_PI);
+            next(Phase::REVERSE, now);
           } else {
             heading_ = -face_angle_;    // from here on the frame of the boxes
             next(Phase::STRAIGHT, now);
           }
         }
         break;
+      case Phase::REVERSE: {
+        // straight back at REVERSE_SPEED, the heading held (backwards a positive heading wants a left steer), the
+        // distance from the wheels; then at rest the boxes and the parking as from a start
+        x_ += u_ * std::cos(heading_) * TICK;
+        if (-x_ >= reverse_ - REVERSE_STOP) {
+          send(0.0, 0.0, now);
+          RCLCPP_INFO(get_logger(), "backed up %.2f m, heading %.1f deg", -x_, heading_ * 180 / M_PI);
+          rest_ = now;
+          next(Phase::SETTLE, now);
+        } else if (t > reverse_ / REVERSE_SPEED + T_RAMP + 2.0) {
+          RCLCPP_ERROR(get_logger(), "%.2f m backed up in %.1f s: stop", -x_, t);
+          next(Phase::DONE, now);
+        } else {
+          const double d = std::atan(REVERSE_GAIN * heading_ * (lf_ + lr_) / REVERSE_SPEED);
+          send(-REVERSE_SPEED * std::min(1.0, t / T_RAMP), interp(d, steer_angle_, steer_cmd_), now);
+        }
+        break;
+      }
       case Phase::DONUT: {
         carry_model(now);
         if (brake_timer_ && !brake_timer_->is_canceled()) {
@@ -607,16 +658,18 @@ private:
         break;
       }
       case Phase::SETTLE:
-        // braked to a stop, then the scans at rest
-        send(0.0, slide_ref_, now);
+        // braked to a stop (after the donut or backing up), then the scans at rest
+        send(0.0, donut_turns_ > 0 ? slide_ref_ : 0.0, now);
         if (std::abs(u_) > 0.02 || std::abs(r_) > 0.05) {
           rest_ = now;
         } else if (donut_only_ && (now - rest_).seconds() > T_REST) {
           relocalize(now);
           break;
         } else if (!collecting_ && (now - rest_).seconds() > T_REST) {
-          RCLCPP_INFO(get_logger(), "donut braked at %.1f deg, stopped at %.1f deg (exit %.1f)", heading_brake_ * 180 / M_PI,
-            heading_ * 180 / M_PI, (donut_turns_ * 2 * M_PI + donut_exit_) * 180 / M_PI);
+          if (donut_turns_ > 0) {
+            RCLCPP_INFO(get_logger(), "donut braked at %.1f deg, stopped at %.1f deg (exit %.1f)", heading_brake_ * 180 / M_PI,
+              heading_ * 180 / M_PI, (donut_turns_ * 2 * M_PI + donut_exit_) * 180 / M_PI);
+          }
           left_x_.clear();
           left_y_.clear();
           scans_ = 0;
@@ -632,7 +685,7 @@ private:
           x_ = y_ = 0.0;
           next(Phase::STRAIGHT, now);
         } else if (t > T_SETTLE) {
-          RCLCPP_ERROR(get_logger(), "%.1f s after the donut's brake, no gap yet: stop", t);
+          RCLCPP_ERROR(get_logger(), "%.1f s at rest after the donut or backing up, no gap yet: stop", t);
           next(Phase::DONE, now);
         }
         break;
@@ -720,7 +773,7 @@ private:
     pub_state_->publish(s);
   }
 
-  enum class Phase { WAIT, ARM, STRAIGHT, KICK, SLIDE, DONE, DONUT, SETTLE };
+  enum class Phase { WAIT, ARM, STRAIGHT, KICK, SLIDE, DONE, DONUT, SETTLE, REVERSE };
 
   void next(Phase p, const rclcpp::Time & now)
   {
@@ -733,7 +786,7 @@ private:
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, kick_speed_, target_, kick_ahead_, kick_left_, side_in_, sweep_, slide_ref_, gap_min_, gap_max_;
   bool slide_bisect_, collecting_, donut_only_, finished_ = false;
-  double slide_turn_, donut_exit_, donut_slide_;
+  double slide_turn_, donut_exit_, donut_slide_, reverse_ = 0.0, window_back_ = -0.3, window_front_ = 2.5;
   int64_t donut_turns_;
 
   Phase phase_ = Phase::WAIT;

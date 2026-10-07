@@ -9,23 +9,26 @@ from launch_ros.substitutions import FindPackageShare
 
 
 # park anywhere: from rest, the boxes found and the approach planned (valet_node), the NMPC on it, the parking from
-# where it stopped (straight away when valet_node exits 2: the car already there). Each step only when the one before
+# where it stopped, backing up first if the plan says so (straight away when valet_node exits 2: the car already
+# there). Each step only when the one before
 # reached its end (exit code 0). The car armed before (ros2 topic pub -w 1 -t 10 /arm ...), localization running
 def generate_launch_description():
     params = PathJoinSubstitution([FindPackageShare('ackermann_description'), 'config', 'vehicle_params.yaml'])
-    path_file = '/tmp/valet_path.csv'
+    path_file, reverse_file = '/tmp/valet_path.csv', '/tmp/valet_reverse.txt'
     kick = {name: ParameterValue(LaunchConfiguration(name), value_type=float) for name in ['kick_ahead', 'kick_left', 'sweep']}
 
     plan = Node(
         package='ackermann_nmpc', executable='valet_node.py', name='valet', output='screen',
         parameters=[{'map': PathJoinSubstitution([FindPackageShare('ackermann_bringup'), 'maps', 'room.yaml']),
-                     'path_file': path_file}, kick])
+                     'path_file': path_file, 'reverse_file': reverse_file,
+                     'reverse_cost': ParameterValue(LaunchConfiguration('reverse_cost'), value_type=float)}, kick])
     approach = Node(
         package='ackermann_nmpc', executable='nmpc_node', name='nmpc', output='screen',
         parameters=[params, {'track_file': path_file, 'open_path': True}])
     park = Node(
         package='ackermann_nmpc', executable='gap_node', name='gap', output='screen',
-        parameters=[params, kick, {'slide_turn': ParameterValue(LaunchConfiguration('slide_turn'), value_type=float)}])
+        parameters=[params, kick, {'slide_turn': ParameterValue(LaunchConfiguration('slide_turn'), value_type=float),
+                                   'reverse_file': reverse_file}])
 
     def then(action, there=None):
         def on_exit(event, context):
@@ -40,7 +43,8 @@ def generate_launch_description():
         DeclareLaunchArgument('kick_ahead', default_value='0.30'),
         DeclareLaunchArgument('kick_left', default_value='0.42'),
         DeclareLaunchArgument('sweep', default_value='0.15'),
-        DeclareLaunchArgument('slide_turn', default_value='36.4'),
+        DeclareLaunchArgument('reverse_cost', default_value='2.0'),    # a m backed up against a m forward
+        DeclareLaunchArgument('slide_turn', default_value='40.0'),     # deg, the slides on these tiles (valet_1-2, gymk_15-27)
         DeclareLaunchArgument('use_sim_time', default_value='false'),  # true in the sim
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
         plan,
