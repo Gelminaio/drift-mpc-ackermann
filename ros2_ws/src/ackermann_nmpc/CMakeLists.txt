@@ -89,6 +89,6 @@ target_link_libraries(gap_node
 install(TARGETS gap_node DESTINATION lib/${PROJECT_NAME})
 
 ament_python_install_package(${PROJECT_NAME})
-install(PROGRAMS scripts/friction_node.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/friction_node.py scripts/valet_node.py DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
