@@ -57,7 +57,6 @@ constexpr double KICK_ALIGN = 0.087; // rad, the car on the line at the kick (~0
 constexpr double KICK_OFF = 0.03;    // m
 constexpr double WHEEL_SLIP = 0.97;  // car over wheels at the launch (0.94-1.00, identification.ipynb)
 constexpr double HALF_WIDTH = 0.10;  // m, the car to the outside of the wheels
-constexpr double ROW_BREAK = 0.10;   // m between points of one box's row
 constexpr double KICK_MIN = 0.35;    // m from the start: the car at speed
 constexpr double LINE_MAX = 0.30;    // m, the line from the start sideways
 constexpr double FACE_MAX = 0.35;    // rad, the side of the boxes against the car at rest
@@ -263,16 +262,16 @@ private:
     std::sort(side_y.begin(), side_y.end());
     face_y_ = side_y[side_y.size() / 2];
     std::sort(side_x.begin(), side_x.end());
-    // rows of points and the free stretches between them: the widest one is the gap
-    double widest = 0.0;
+    // rows of points and the free stretches between them: the gap is the nearest one ahead at least gap_min long
+    // (the widest was a wall further along the faces when the boxes stand anywhere: sim_valet_p1)
     for (size_t i = 1; i < side_x.size(); i++) {
-      if (side_x[i] - side_x[i - 1] > std::max(widest, ROW_BREAK)) {
-        widest = side_x[i] - side_x[i - 1];
+      if (side_x[i - 1] > 0.0 && side_x[i] - side_x[i - 1] > gap_min_) {
         gap_from_ = side_x[i - 1];
         gap_to_ = side_x[i];
+        return true;
       }
     }
-    return widest > 0.0;
+    return false;
   }
 
   void on_imu(const sensor_msgs::msg::Imu & m)
