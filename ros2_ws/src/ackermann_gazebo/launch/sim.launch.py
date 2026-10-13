@@ -9,12 +9,16 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     gazebo = FindPackageShare('ackermann_gazebo')
-    world = PathJoinSubstitution([gazebo, 'worlds', 'room.sdf'])
+    world = PathJoinSubstitution([gazebo, 'worlds', [LaunchConfiguration('world'), '.sdf']])
     xacro_file = PathJoinSubstitution([FindPackageShare('ackermann_description'), 'urdf', 'ackermann.xacro'])
     gz_launch = PathJoinSubstitution([FindPackageShare('ros_gz_sim'), 'launch', 'gz_sim.launch.py'])
 
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='false'),
+        DeclareLaunchArgument('world', default_value='room'),      # worlds/<world>.sdf
+        DeclareLaunchArgument('x', default_value='3.010'),         # the start mark
+        DeclareLaunchArgument('y', default_value='0.350'),
+        DeclareLaunchArgument('yaw', default_value='-0.801'),
 
         # headless server, or server + GUI
         IncludeLaunchDescription(PythonLaunchDescriptionSource(gz_launch),
@@ -24,14 +28,15 @@ def generate_launch_description():
                                  launch_arguments={'gz_args': ['-r ', world]}.items(),
                                  condition=IfCondition(LaunchConfiguration('gui'))),
 
-        # on the start mark of the real room (docs/localization.md). robot_state_publisher
+        # on the start mark (default: the real room's, docs/localization.md). robot_state_publisher
         # runs in robot.launch.py, as on the Pi
         Node(
             package='ros_gz_sim',
             executable='create',
             output='screen',
             arguments=['-string', Command(['xacro ', xacro_file, ' sim:=true']), '-name', 'car',
-                       '-x', '3.010', '-y', '0.350', '-z', '0.0', '-Y', '-0.801'],
+                       '-x', LaunchConfiguration('x'), '-y', LaunchConfiguration('y'), '-z', '0.0',
+                       '-Y', LaunchConfiguration('yaw')],
         ),
 
         Node(

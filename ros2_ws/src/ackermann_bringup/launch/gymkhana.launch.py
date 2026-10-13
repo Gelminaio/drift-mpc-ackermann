@@ -19,7 +19,8 @@ def generate_launch_description():
         return Node(
             package='ackermann_nmpc', executable='nmpc_node', name='nmpc', output='screen',
             parameters=[params,
-                        {'track_file': PathJoinSubstitution([bringup, 'maps', f'room_{path}.csv']), 'open_path': True,
+                        {'track_file': PathJoinSubstitution([bringup, 'maps', [LaunchConfiguration('layout'), f'_{path}.csv']]),
+                         'open_path': True,
                          'speed_scale': ParameterValue(LaunchConfiguration('speed_scale'), value_type=float),
                          'mu_scale': ParameterValue(LaunchConfiguration('mu_scale'), value_type=float)}])
 
@@ -40,6 +41,7 @@ def generate_launch_description():
         return on_exit
 
     return LaunchDescription([
+        DeclareLaunchArgument('layout', default_value='room'),         # maps/<layout>_gymkhana.csv, _gymkhana_back.csv
         DeclareLaunchArgument('speed_scale', default_value='1.0'),
         DeclareLaunchArgument('mu_scale', default_value='1.0'),        # floor friction the NMPC assumes
         DeclareLaunchArgument('donut_turns', default_value='1'),
