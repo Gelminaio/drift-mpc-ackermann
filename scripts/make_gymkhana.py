@@ -3,11 +3,13 @@ import sys
 import numpy as np
 from scipy.interpolate import CubicSpline
 
-# the gymkhana's two open paths on the racing line of maps/room (room_track.csv): from rest on the start mark, past
+# the gymkhana's two open paths on a racing line from make_track.py (<map>_track.csv): from rest on the start mark, past
 # the boxes, round the ring with a slalom round CONES cones on the far straight, to a stop in the corner after it
-# (DONUT: the donut there); then from there to the start mark (the parking). Speed profile from the lateral and the
-# longitudinal grip, from rest to rest. Run from the repo root.
-# make_gymkhana.py [cones spacing amplitude a_lat] -> maps/room_gymkhana.csv, room_gymkhana_back.csv, room_gymkhana_cones.csv
+# (the donut there); then from there to the start mark (the parking). Speed profile from the lateral and the
+# longitudinal grip, from rest to rest. The ring's straights, from the start of the near one counterclockwise, are
+# where its curvature is 0. Run from the repo root.
+# make_gymkhana.py [map [cones spacing amplitude a_lat]] -> maps/<map>_gymkhana.csv, _gymkhana_back.csv,
+# _gymkhana_cones.csv (map: room)
 MAPS = 'ros2_ws/src/ackermann_bringup/maps'
 CONES, SPACING, AMPLITUDE = 2, 0.9, 0.2     # m between the cones, m the line passes beside them
 FIRST = -1       # the first cone passed on the right (-1): the swing then turns against the corner before the straight
@@ -15,18 +17,23 @@ A_LAT = 2.0      # m/s2, the slalom near the limit of the tiles (~0.26 g); the N
 A_LONG = 1.5     # m/s2
 V_MAX = 1.1      # m/s, the wheels reach 1.16
 START = 0.05     # m, s of the ring where the car starts at rest: the start mark
-DONUT = 6.65     # m, s of the ring where the first path stops: the corner after the far straight, ~0.6 m clear
+DONUT_PAST = 0.17    # m into the corner after the far straight where the first path stops (the donut), ~0.6 m clear
 R_LAST = 0.4     # m, the way back takes the last corner tighter than the ring (0.6) to be on the near straight sooner
 STOP = -0.15     # m before the start mark where the way back stops (after it): 0.35 m on the line of the near straight
 V_FINAL, FINAL = 0.3, 0.3    # m/s over the last m of each path: the NMPC does not follow a hard braking to the end
 V_END = 0.25     # m/s at the ends, then braked
 DS = 0.02
-if len(sys.argv) > 1:
-    CONES, SPACING, AMPLITUDE, A_LAT = int(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
+MAP = sys.argv[1] if len(sys.argv) > 1 else 'room'
+if len(sys.argv) > 2:
+    CONES, SPACING, AMPLITUDE, A_LAT = int(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5])
 
-ring = np.loadtxt(f'{MAPS}/room_track.csv', delimiter=',', skiprows=1)
+ring = np.loadtxt(f'{MAPS}/{MAP}_track.csv', delimiter=',', skiprows=1)
 s_r, x_r, y_r, yaw_r = ring[:, 0], ring[:, 1], ring[:, 2], ring[:, 3]
 length = s_r[-1] + np.hypot(x_r[0] - x_r[-1], y_r[0] - y_r[-1])
+flat = np.abs(ring[:, 4]) < 1e-6
+edges = np.flatnonzero(np.diff(np.r_[0, flat.astype(int), 0]))
+near, right, far, left = [(s_r[a], s_r[b]) for a, b in zip(edges[::2], edges[1::2])]   # to each corner's start
+DONUT = far[1] + DONUT_PAST
 
 
 def base(s):
@@ -40,7 +47,7 @@ def base(s):
 
 # the slalom: the cones on the far straight, centred on it; the line beside each, alternately left and right,
 # on the racing line at the ends of the straight (its corners keep their curvature alone)
-straight_from, straight_to = 4.38, 6.43
+straight_from, straight_to = far[0], far[1] - 0.05
 mid = (straight_from + straight_to) / 2
 s_cones = mid + (np.arange(CONES) - (CONES - 1) / 2) * SPACING
 knots = np.r_[straight_from, s_cones, straight_to]
@@ -53,14 +60,14 @@ def line(s_from, s_to):
     return np.array([x_r[m].mean(), y_r[m].mean()]), np.arctan2(np.sin(yaw_r[m]).mean(), np.cos(yaw_r[m]).mean())
 
 
-SHORT = 7.6      # m, s on the short straight before the last corner where the way back leaves the ring
+SHORT = (left[0] + left[1]) / 2   # m, s on the short straight before the last corner where the way back leaves it
 
 
 def back_end():
     # the end of the way back: from the ring's short straight on to R_LAST before the vertex V of its last corner,
     # the arc of R_LAST, the near straight's line to STOP before the start mark
-    p1, h1 = line(7.45, 7.75)
-    p0, h0 = line(0.1, 1.9)
+    p1, h1 = line(*left)
+    p0, h0 = line(*near)
     d1, d0 = np.array([np.cos(h1), np.sin(h1)]), np.array([np.cos(h0), np.sin(h0)])
     k = np.linalg.solve(np.c_[d1, -d0], p0 - p1)
     v = p1 + k[0] * d1                                                     # the vertex
@@ -99,7 +106,7 @@ def path(s_from, s_to, name):
         v[i] = min(v[i], np.sqrt(v[i - 1] ** 2 + 2 * A_LONG * step[i - 1]))
     for i in range(len(v) - 2, -1, -1):
         v[i] = min(v[i], np.sqrt(v[i + 1] ** 2 + 2 * A_LONG * step[i]))
-    np.savetxt(f'{MAPS}/room_{name}.csv', np.c_[s_path, x, y, yaw, kappa, v], delimiter=',', fmt='%.4f',
+    np.savetxt(f'{MAPS}/{MAP}_{name}.csv', np.c_[s_path, x, y, yaw, kappa, v], delimiter=',', fmt='%.4f',
                header='s,x,y,yaw,kappa,v', comments='')
     print(f'{name}: {s_path[-1]:.2f} m, radius min {1 / np.abs(kappa).max():.2f} m, speed max {v.max():.2f}, '
           f'{np.sum(step / np.maximum(v[1:], 0.05)):.1f} s; from ({x[0]:.2f}, {y[0]:.2f}) {np.degrees(yaw[0]):.1f} deg '
@@ -110,6 +117,6 @@ print(f'{CONES} cones {SPACING} m apart, {AMPLITUDE} m beside them')
 path(START, DONUT, 'gymkhana')
 path(DONUT, length + START, 'gymkhana_back')
 cx, cy, _ = base(s_cones)
-np.savetxt(f'{MAPS}/room_gymkhana_cones.csv', np.c_[cx, cy], delimiter=',', fmt='%.3f', header='x,y', comments='')
+np.savetxt(f'{MAPS}/{MAP}_gymkhana_cones.csv', np.c_[cx, cy], delimiter=',', fmt='%.3f', header='x,y', comments='')
 for i, (a, b) in enumerate(zip(cx, cy)):
     print(f'cone {i + 1}: ({a:.3f}, {b:.3f})')
