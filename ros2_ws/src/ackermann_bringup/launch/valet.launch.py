@@ -19,7 +19,7 @@ def generate_launch_description():
 
     plan = Node(
         package='ackermann_nmpc', executable='valet_node.py', name='valet', output='screen',
-        parameters=[{'map': PathJoinSubstitution([FindPackageShare('ackermann_bringup'), 'maps', 'room.yaml']),
+        parameters=[{'map': PathJoinSubstitution([FindPackageShare('ackermann_bringup'), 'maps', [LaunchConfiguration('map'), '.yaml']]),
                      'path_file': path_file, 'reverse_file': reverse_file,
                      'reverse_cost': ParameterValue(LaunchConfiguration('reverse_cost'), value_type=float)}, kick])
     approach = Node(
@@ -40,6 +40,7 @@ def generate_launch_description():
         return on_exit
 
     return LaunchDescription([
+        DeclareLaunchArgument('map', default_value='room'),            # maps/<map>.yaml, the one localization runs on
         DeclareLaunchArgument('kick_ahead', default_value='0.30'),
         DeclareLaunchArgument('kick_left', default_value='0.42'),
         DeclareLaunchArgument('sweep', default_value='0.15'),
