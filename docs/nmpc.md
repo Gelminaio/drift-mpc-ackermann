@@ -188,6 +188,52 @@ modes parting 100 ms after the brake. From the yaw rate the rest of the turn is 
 150 ms in, too late for the servo. Held straight the slide turns 27.1 +- 1.8 deg but the body sweeps
 5 cm further. One run needs 0.40 +- 0.02 m; ~0.50 m keeps 2-7 cm at each end.
 
+## Gymkhana
+
+`launch/gymkhana.launch.py` (`notebooks/gymkhana.ipynb`), one launch from the start mark: `nmpc_node` drives
+the lap with the slalom (`open_path`: it stops where the path ends, exit code 0 there), `gap_node` the donut
+(full lock, full throttle, braked on the gyro to end at its starting heading; then it sets the
+localization back where the donut started), `nmpc_node` the way back, `gap_node` the parking. Each starts
+when the one before ended with 0.
+
+    ros2 launch ackermann_bringup gymkhana.launch.py layout:=room2 [slide_turn:=40.0]
+
+Under the video's camera (`maps/room2`), the ten takes of the shoot day, by the lidar:
+
+| | |
+|---|---|
+| take | 28.9-34.9 s, pauses of 2.2-6.8 s between the steps |
+| lap from its path | 3.3-5.6 cm rms, 14.3 at most |
+| cones, closest | 8.1 and 15.3 cm |
+| parked | 179.3-182.3 deg, the middle within 3.4 cm of its aim |
+| boxes, closest | A 5.4, B 6.3 cm |
+
+A new node on the Pi found the running ones 3-6 s late and stopped two takes: `setup/pi/fastdds.xml`
+(20 announcements 100 ms apart) brought it to 0.6-1.5 s.
+
+## Park anywhere
+
+`ackermann_nmpc/valet.py`, `scripts/valet_node.py`, `launch/valet.launch.py` (`notebooks/park_anywhere.ipynb`).
+At rest, the lidar points more than 10 cm from the map's walls are new; two groups of them whose sides
+towards the car lie on one line, 0.40-0.75 m apart along it, are the boxes and the gap. The parking
+starts on that line where `gap_node` would start from rest, 0.6 m before its kick. The approach is the
+shortest arc-straight-arc path of radius 0.5 m ending on 0.3 m of the line, the car's outline 5 cm
+clear of the walls and the boxes; when that start cannot be reached driving forward, or when it costs
+less (a metre backed up counts as two driven), a path to a point further along the line, from which
+`gap_node` backs up. `nmpc_node` drives it, `gap_node` backs up and parks.
+
+    ros2 launch ackermann_bringup valet.launch.py map:=room2 [kick_ahead:=0.30 sweep:=0.15]
+
+11 runs, the boxes at 6 places, by the lidar:
+
+| | |
+|---|---|
+| gaps | 0.54-0.65 m |
+| approach | 1.1-4.5 m; 6 runs backed up 0.7-2.5 m |
+| path from the plan | 1.4-4.8 cm rms |
+| parked | 175.2-191.4 deg |
+| boxes, closest | one touch (`valet_1`, the nose); otherwise A 6.9, B 0.8 cm |
+
 ## Gazebo
 
 The session of `docs/simulation.md`, 3 laps on the speed profile of the tiles, the NMPC told the
