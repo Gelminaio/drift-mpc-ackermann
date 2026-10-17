@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A new node announces itself 20 times in its first 2 s (default 5 in 0.5 s), then every 1 s (default 3 s):
+     a missed first exchange cost 3 s. A new node on the Pi with a session's load had both of its transforms in
+     0.63-1.53 s (20 trials), 0.69-3.06 s with the defaults -->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <participant profile_name="pi" is_default_profile="true">
+      <rtps>
+        <builtin>
+          <discovery_config>
+            <leaseAnnouncement><sec>1</sec></leaseAnnouncement>
+            <initialAnnouncements>
+              <count>20</count>
+              <period><nanosec>100000000</nanosec></period>
+            </initialAnnouncements>
+          </discovery_config>
+        </builtin>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

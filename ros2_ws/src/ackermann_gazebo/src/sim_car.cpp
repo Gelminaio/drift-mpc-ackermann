@@ -212,9 +212,9 @@ public:
     sub_drive_ = node_->create_subscription<ackermann_msgs::msg::AckermannDrive>(
       "drive", 10, [this](const ackermann_msgs::msg::AckermannDrive & m) {
         std::lock_guard<std::mutex> lock(mutex_);
-        // the model is forward only: no reverse
+        // a negative speed drives backwards (the firmware's), only slowly: the kinematic bicycle below V_KIN
         commands_.push_back({now_, std::clamp(static_cast<double>(m.steering_angle), -SERVO_MAX, SERVO_MAX),
-                             std::max(static_cast<double>(m.speed), 0.0)});
+                             static_cast<double>(m.speed)});
         last_cmd_ = now_;
       });
     sub_arm_ = node_->create_subscription<std_msgs::msg::Bool>(
@@ -270,7 +270,7 @@ public:
     const double d_cmd = interp(servo, p_.steer_cmd, p_.steer_angle);
     servo_angle_ += std::clamp(d_cmd - servo_angle_, -p_.steer_rate * h, p_.steer_rate * h);
     // duty 0, disarmed or setpoint in the deadband: the motor driver brakes the rear wheels
-    const bool braked = !armed || setpoint < PID_DEADBAND;
+    const bool braked = !armed || std::abs(setpoint) < PID_DEADBAND;
     const auto tire = node_->get_parameter("tire").as_double_array();
     p_.mu_f = tire[0];
     p_.b_f = tire[1];
@@ -304,7 +304,7 @@ private:
     if (std::max(x[VX], x[U]) < V_KIN) {
       // the kinematic bicycle, rear axle without slip
       x[D] += h * (servo_angle_ - x[D]) / p_.steer_lag;
-      x[U] = std::max(x[U] + h * wheel_accel(p_, x[U], setpoint, braked), 0.0);
+      x[U] += h * wheel_accel(p_, x[U], setpoint, braked);
       ax_ = ay_ = 0.0;
       x[VX] = x[U];
       x[R] = x[U] * std::tan(x[D]) / (p_.lf + p_.lr);

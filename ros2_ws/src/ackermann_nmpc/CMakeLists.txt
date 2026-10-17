@@ -5,10 +5,12 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(ackermann_description REQUIRED)
 find_package(ackermann_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 
@@ -77,14 +79,16 @@ add_executable(gap_node src/gap_node.cpp)
 target_compile_features(gap_node PUBLIC cxx_std_17)
 target_link_libraries(gap_node
   ${ackermann_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
   rclcpp::rclcpp
   ${sensor_msgs_TARGETS}
   ${std_msgs_TARGETS}
+  ${std_srvs_TARGETS}
   tf2::tf2
   tf2_ros::tf2_ros)
 install(TARGETS gap_node DESTINATION lib/${PROJECT_NAME})
 
 ament_python_install_package(${PROJECT_NAME})
-install(PROGRAMS scripts/friction_node.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/friction_node.py scripts/valet_node.py DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

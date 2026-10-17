@@ -2,15 +2,18 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <fstream>
 #include <vector>
 
 #include <ackermann_msgs/msg/ackermann_drive.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
+#include <std_srvs/srv/empty.hpp>
 #include <tf2/exceptions.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -22,9 +25,14 @@
 // acts plus the turn of the slide at full lock measured on the car (slide_turn) is target, the command
 // sent when due between the steps; the car slides sideways into the gap. With slide_turn 0 the model, run
 // to the stop, decides the brake, and in the slide the steering is chosen by bisection (slide_bisect).
-// The car holds the line of the start; it kicks where it will stop with as much room at its nose as beyond
-// its swept tail, from where the car stopped against the kick (kick_ahead, kick_left). The boxes must be
-// where the car will stop sideways (LATERAL_TOL).
+// With donut_turns, first a donut where the car is: full lock, full throttle from rest, braked so that it ends
+// at donut_exit after the turns; the gap is found where it stops. With donut_only the run ends there instead: the
+// wheels spin in the donut, so the localization is set back where the donut started, turned by the gyro, and asked
+// to update at rest. The line and the heading come from the boxes:
+// their side is the nearest line of points, at the angle where
+// most points line up on it, so the car may start a little off and askew. The car holds the line where it
+// will stop with its side side_in inside the boxes, and kicks where it will stop with as much room at its
+// nose as beyond its swept tail, from where the car stopped against the kick (kick_ahead, kick_left).
 // The model is the refit of 2026-09-30, carried from the kick with what was sent and the wheel speed. The
 // last gyro reading is gyro_lag older than its message: its yaw rate corrects the model's of that time,
 // and the heading now is the gyro's plus what the model turned since.
@@ -34,16 +42,29 @@ constexpr double DT_MODEL = 0.005;   // s, model steps in the prediction
 constexpr double HORIZON = 1.6;      // s, longest prediction
 constexpr double T_RAMP = 1.0;       // s from rest to speed
 constexpr double T_ARM = 0.5;        // s armed at rest before starting
+constexpr double T_POSE = 8.0;       // s more at rest waiting for the localization before the donut: a new node on
+                                     // the Pi gets the second of its transforms 3-6 s late (DDS discovery)
 constexpr double T_KICK = 2.0;       // s kicking without braking: stop
 constexpr double T_SLIDE = 1.5;      // s from the brake to the end
+constexpr double T_DONUT = 1.8;      // s per turn of the donut: stop
+constexpr double T_REST = 0.3;       // s at rest after the donut before the scans
+constexpr double T_SETTLE = 3.0;     // s from the donut's brake to the gap: stop
+constexpr double T_UPDATES = 0.3;    // s between the localization's updates at rest after the donut
+constexpr int UPDATES = 6;
 constexpr double IMU_TIMEOUT = 0.1;  // s without the gyro: stop
 constexpr double SLIDE_STEER_MIN = -0.15;   // countersteered further the car swings back (hbn runs)
-constexpr double LOOKAHEAD = 0.4;    // m, pure pursuit on the line of the approach
+constexpr double LOOKAHEAD = 0.3;    // m, pure pursuit on the line of the approach
+constexpr double REVERSE_SPEED = 0.3;   // m/s backwards along the line before the run-up (reverse_file)
+constexpr double REVERSE_GAIN = 2.0;    // 1/s, the heading held while backing up
+constexpr double REVERSE_STOP = 0.02;   // m the car rolls on after the brake at REVERSE_SPEED
+constexpr double KICK_ALIGN = 0.087; // rad, the car on the line at the kick (~0.3 cm of stop per deg off): else stop
+constexpr double KICK_OFF = 0.03;    // m
 constexpr double WHEEL_SLIP = 0.97;  // car over wheels at the launch (0.94-1.00, identification.ipynb)
 constexpr double HALF_WIDTH = 0.10;  // m, the car to the outside of the wheels
-constexpr double ROW_BREAK = 0.10;   // m between points of one box's row
 constexpr double KICK_MIN = 0.35;    // m from the start: the car at speed
-constexpr double LATERAL_TOL = 0.06; // m, the boxes from where the car will stop sideways
+constexpr double LINE_MAX = 0.30;    // m, the line from the start sideways
+constexpr double FACE_MAX = 0.35;    // rad, the side of the boxes against the car at rest
+constexpr double FACE_STEP = 0.0087; // rad, 0.5 deg
 
 double interp(double x, const std::vector<double> & xs, const std::vector<double> & ys)
 {
@@ -130,6 +151,22 @@ public:
     // (braking at 137-149 deg), whatever its yaw rate, where the model's prediction moved the other way
     // (sideways.ipynb). 0: the model decides
     slide_turn_ = declare_parameter("slide_turn", 36.4) * M_PI / 180;
+    // donut before the parking: turns (0: none), braked to end at donut_exit (deg, against the start heading)
+    donut_turns_ = declare_parameter("donut_turns", 0);
+    donut_exit_ = declare_parameter("donut_exit", 180.0) * M_PI / 180;
+    // deg the car turns from when the donut's brake acts to the stop: 33.3 and 28.8 on the car (gymk_5, gymk_7)
+    donut_slide_ = declare_parameter("donut_slide", 31.0) * M_PI / 180;
+    donut_only_ = declare_parameter("donut_only", false);
+    // park anywhere: m to back up along the line first, from the file valet_node writes (empty: none)
+    const std::string reverse_file = declare_parameter("reverse_file", "");
+    if (!reverse_file.empty()) {
+      std::ifstream(reverse_file) >> reverse_;
+    }
+    collecting_ = donut_turns_ == 0;
+    // backing up first: the boxes where they will be seen from the run-up, now reverse m further behind (the nearest
+    // line was something ahead of the car when the window reached it: sim_valet_r3b)
+    window_back_ = -0.3 - reverse_;
+    window_front_ = 2.5 - reverse_;
     gap_min_ = declare_parameter("gap_min", 0.40);        // m, a gap outside gap_min .. gap_max: refuse
     gap_max_ = declare_parameter("gap_max", 1.0);
     const double g = 9.81, l = lf_ + lr_;
@@ -139,6 +176,8 @@ public:
     pub_drive_ = create_publisher<ackermann_msgs::msg::AckermannDrive>("/drive", 10);
     pub_arm_ = create_publisher<std_msgs::msg::Bool>("/arm", 10);
     pub_state_ = create_publisher<std_msgs::msg::Float64MultiArray>("gap/state", 10);
+    pub_initial_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/initialpose", 1);
+    nomotion_ = create_client<std_srvs::srv::Empty>("/request_nomotion_update");
     sub_imu_ = create_subscription<sensor_msgs::msg::Imu>(
       "/imu/data_raw", 50, [this](const sensor_msgs::msg::Imu & m) { on_imu(m); });
     sub_joints_ = create_subscription<sensor_msgs::msg::JointState>(
@@ -150,12 +189,17 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(TICK), [this] { tick(); });
   }
 
+  bool finished() const
+  {
+    return finished_;
+  }
+
 private:
   // at rest: points left of the car from a few scans
   void on_scan(const sensor_msgs::msg::LaserScan & m)
   {
-    if (phase_ != Phase::WAIT) {
-      return;
+    if (!collecting_ || scans_ >= 5) {
+      return;    // five scans at rest: more only slow the search down
     }
     if (std::isnan(lidar_x_)) {
       try {
@@ -168,7 +212,7 @@ private:
       if (std::isfinite(m.ranges[i])) {
         const double a = m.angle_min + i * m.angle_increment;
         const double x = m.ranges[i] * std::cos(a) + lidar_x_, y = m.ranges[i] * std::sin(a);
-        if (x > -0.3 && x < 2.0 && y > 0.15 && y < 1.0) {
+        if (x > window_back_ && x < window_front_ && y > 0.1 && y < 1.2) {
           left_x_.push_back(x);
           left_y_.push_back(y);
         }
@@ -177,35 +221,79 @@ private:
     scans_++;
   }
 
-  // the gap: the side of the boxes is the nearest line of points; along it two rows, the gap between
-  bool find_gap()
+  // the side of the boxes: the nearest line of points, at the angle where most points line up on it
+  bool face_line()
   {
     if (left_y_.size() < 50) {
       return false;
     }
-    std::vector<double> ys = left_y_;
-    std::sort(ys.begin(), ys.end());
-    const double near = ys[ys.size() / 10];
+    std::vector<double> ys(left_y_.size());
+    size_t best = 0;
+    double best_near = 0.0;
+    for (double a = -FACE_MAX; a <= FACE_MAX; a += FACE_STEP) {
+      for (size_t i = 0; i < ys.size(); i++) {
+        ys[i] = -std::sin(a) * left_x_[i] + std::cos(a) * left_y_[i];
+      }
+      std::vector<double> sorted = ys;
+      std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 10, sorted.end());
+      const double near = sorted[sorted.size() / 10];
+      const size_t on = std::count_if(ys.begin(), ys.end(), [near](double y) { return std::abs(y - near) < 0.015; });
+      if (on > best) {
+        best = on;
+        best_near = near;
+        face_angle_ = a;
+      }
+    }
+    // finer than the step: a straight line through the points on it
+    double n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (size_t i = 0; i < ys.size(); i++) {
+      if (std::abs(-std::sin(face_angle_) * left_x_[i] + std::cos(face_angle_) * left_y_[i] - best_near) < 0.015) {
+        n += 1;
+        sx += left_x_[i];
+        sy += left_y_[i];
+        sxx += left_x_[i] * left_x_[i];
+        sxy += left_x_[i] * left_y_[i];
+      }
+    }
+    face_angle_ = std::atan((n * sxy - sx * sy) / (n * sxx - sx * sx));
+    return true;
+  }
+
+  // the gap: along the side of the boxes two rows, the gap between. In the frame of that line: x along it, y to its
+  // left
+  bool find_gap()
+  {
+    if (!face_line()) {
+      return false;
+    }
+    std::vector<double> fx(left_x_.size()), fy(left_x_.size());
+    for (size_t i = 0; i < fx.size(); i++) {
+      fx[i] = std::cos(face_angle_) * left_x_[i] + std::sin(face_angle_) * left_y_[i];
+      fy[i] = -std::sin(face_angle_) * left_x_[i] + std::cos(face_angle_) * left_y_[i];
+    }
+    std::vector<double> sorted = fy;
+    std::sort(sorted.begin(), sorted.end());
+    const double near = sorted[sorted.size() / 10];
     std::vector<double> side_y, side_x;
-    for (size_t i = 0; i < left_x_.size(); i++) {
-      if (std::abs(left_y_[i] - near) < 0.03) {
-        side_y.push_back(left_y_[i]);
-        side_x.push_back(left_x_[i]);
+    for (size_t i = 0; i < fx.size(); i++) {
+      if (std::abs(fy[i] - near) < 0.03) {
+        side_y.push_back(fy[i]);
+        side_x.push_back(fx[i]);
       }
     }
     std::sort(side_y.begin(), side_y.end());
     face_y_ = side_y[side_y.size() / 2];
     std::sort(side_x.begin(), side_x.end());
-    // rows of points and the free stretches between them: the widest one is the gap
-    double widest = 0.0;
+    // rows of points and the free stretches between them: the gap is the nearest one ahead at least gap_min long
+    // (the widest was a wall further along the faces when the boxes stand anywhere: sim_valet_p1)
     for (size_t i = 1; i < side_x.size(); i++) {
-      if (side_x[i] - side_x[i - 1] > std::max(widest, ROW_BREAK)) {
-        widest = side_x[i] - side_x[i - 1];
+      if (side_x[i - 1] > 0.0 && side_x[i] - side_x[i - 1] > gap_min_) {
         gap_from_ = side_x[i - 1];
         gap_to_ = side_x[i];
+        return true;
       }
     }
-    return widest > 0.0;
+    return false;
   }
 
   void on_imu(const sensor_msgs::msg::Imu & m)
@@ -372,14 +460,72 @@ private:
     if (brake_timer_) {
       brake_timer_->cancel();
     }
-    if (phase_ != Phase::KICK) {
+    if (phase_ != Phase::KICK && phase_ != Phase::DONUT) {
       return;    // stopped meanwhile
     }
     const rclcpp::Time now = get_clock()->now();
     heading_brake_ = heading_now_;
-    next(Phase::SLIDE, now);
-    steer_ = slide_bisect_ ? slide_steering(now) : slide_ref_;
+    const bool donut = phase_ == Phase::DONUT;
+    next(donut ? Phase::SETTLE : Phase::SLIDE, now);
+    steer_ = slide_bisect_ && !donut ? slide_steering(now) : slide_ref_;
     send(0.0, steer_, now);
+  }
+
+  // after the donut, at rest: the localization set back where the donut started, turned by the gyro, then
+  // UPDATES updates without motion
+  void relocalize(const rclcpp::Time & now)
+  {
+    if (updates_ == 0) {
+      RCLCPP_INFO(get_logger(), "donut braked at %.1f deg, stopped at %.1f deg (exit %.1f); localization set back to "
+        "(%.3f, %.3f, %.1f deg)", heading_brake_ * 180 / M_PI, heading_ * 180 / M_PI,
+        (donut_turns_ * 2 * M_PI + donut_exit_) * 180 / M_PI, start_x_, start_y_, (start_yaw_ + heading_) * 180 / M_PI);
+    }
+    if (updates_ < 3) {
+      // three times: the localization takes it best effort
+      geometry_msgs::msg::PoseWithCovarianceStamped p;
+      p.header.stamp = now;
+      p.header.frame_id = "map";
+      p.pose.pose.position.x = start_x_;
+      p.pose.pose.position.y = start_y_;
+      p.pose.pose.orientation.z = std::sin((start_yaw_ + heading_) / 2);
+      p.pose.pose.orientation.w = std::cos((start_yaw_ + heading_) / 2);
+      p.pose.covariance[0] = p.pose.covariance[7] = 0.25 * 0.25;    // the donut moves the car up to ~0.25 m
+      p.pose.covariance[35] = 0.05 * 0.05;
+      pub_initial_->publish(p);
+      last_update_ = now;
+      updates_++;
+    } else if ((now - last_update_).seconds() > T_UPDATES) {
+      if (updates_ < 3 + UPDATES) {
+        nomotion_->async_send_request(std::make_shared<std_srvs::srv::Empty::Request>());
+      } else {
+        finished_ = true;
+        next(Phase::DONE, now);
+      }
+      last_update_ = now;
+      updates_++;
+    }
+  }
+
+  // where the middle of the car stops: the same room at the nose and beyond the swept tail; its side side_in
+  // inside the boxes. The line the car holds to get there
+  bool plan_gap()
+  {
+    if (!find_gap()) {
+      RCLCPP_ERROR(get_logger(), "no gap on the left: stop");
+      return false;
+    }
+    mid_x_ = (gap_from_ + gap_to_ - sweep_) / 2;
+    y_line_ = face_y_ + HALF_WIDTH + side_in_ - kick_left_;
+    RCLCPP_INFO(get_logger(), "gap %.3f .. %.3f m ahead, boxes %.3f m left at %.1f deg: kick at %.3f m, the line %.3f m left",
+      gap_from_, gap_to_, face_y_, face_angle_ * 180 / M_PI, mid_x_ - kick_ahead_, y_line_);
+    if (gap_to_ - gap_from_ < gap_min_ || gap_to_ - gap_from_ > gap_max_ || mid_x_ - kick_ahead_ < KICK_MIN ||
+      std::abs(y_line_) > LINE_MAX)
+    {
+      RCLCPP_ERROR(get_logger(), "gap %.3f m (%.2f .. %.2f), kick at %.3f m (min %.2f), the line %.3f m left (max %.2f): stop",
+        gap_to_ - gap_from_, gap_min_, gap_max_, mid_x_ - kick_ahead_, KICK_MIN, y_line_, LINE_MAX);
+      return false;
+    }
+    return true;
   }
 
   // arming zeroes the setpoint (firmware, sim_car): only at rest, not with every command
@@ -413,25 +559,10 @@ private:
     }
     switch (phase_) {
       case Phase::WAIT:
-        if (bias_samples_.size() >= 50 && scans_ >= 5 && pub_drive_->get_subscription_count() > 0 &&
+        if (bias_samples_.size() >= 50 && (!collecting_ || scans_ >= 5) && pub_drive_->get_subscription_count() > 0 &&
           pub_arm_->get_subscription_count() > 0)
         {
-          if (!find_gap()) {
-            RCLCPP_ERROR(get_logger(), "no gap on the left: stop");
-            next(Phase::DONE, now);
-            break;
-          }
-          // where the middle of the car stops: the same room at the nose and beyond the swept tail; its side
-          // side_in inside the boxes
-          mid_x_ = (gap_from_ + gap_to_ - sweep_) / 2;
-          const double mid_y = face_y_ + HALF_WIDTH + side_in_;
-          RCLCPP_INFO(get_logger(), "gap %.3f .. %.3f m ahead, boxes %.3f m left: kick at %.3f m, the car %.3f m too far in",
-            gap_from_, gap_to_, face_y_, mid_x_ - kick_ahead_, kick_left_ - mid_y);
-          if (gap_to_ - gap_from_ < gap_min_ || gap_to_ - gap_from_ > gap_max_ || mid_x_ - kick_ahead_ < KICK_MIN ||
-            std::abs(kick_left_ - mid_y) > LATERAL_TOL)
-          {
-            RCLCPP_ERROR(get_logger(), "gap %.3f m (%.2f .. %.2f), kick at %.3f m (min %.2f), sideways %.3f m (max %.2f): stop",
-              gap_to_ - gap_from_, gap_min_, gap_max_, mid_x_ - kick_ahead_, KICK_MIN, kick_left_ - mid_y, LATERAL_TOL);
+          if (reverse_ > 0.0 ? !face_line() : collecting_ && !plan_gap()) {
             next(Phase::DONE, now);
             break;
           }
@@ -444,23 +575,139 @@ private:
         arm(true);
         send(0.0, 0.0, now);
         if (t > T_ARM) {
-          heading_ = 0.0;
+          if (donut_turns_ > 0) {
+            // the newest localization correction on the newest odometry, as the NMPC: map -> base_footprint at
+            // one time fails while the corrections are dated ahead
+            try {
+              const auto c = tf_buffer_->lookupTransform("map", "odom", tf2::TimePointZero).transform;
+              const auto o = tf_buffer_->lookupTransform("odom", "base_footprint", tf2::TimePointZero).transform;
+              const double yc = 2 * std::atan2(c.rotation.z, c.rotation.w);
+              start_x_ = c.translation.x + std::cos(yc) * o.translation.x - std::sin(yc) * o.translation.y;
+              start_y_ = c.translation.y + std::sin(yc) * o.translation.x + std::cos(yc) * o.translation.y;
+              start_yaw_ = yc + 2 * std::atan2(o.rotation.z, o.rotation.w);
+              if (t > T_ARM + 0.1) {
+                RCLCPP_INFO(get_logger(), "localization after %.1f s", t);
+              }
+            } catch (const tf2::TransformException & e) {
+              if (donut_only_ && t < T_ARM + T_POSE) {
+                break;
+              }
+              if (donut_only_) {
+                RCLCPP_ERROR(get_logger(), "no localization before the donut (%s): stop", e.what());
+                next(Phase::DONE, now);
+                break;
+              }
+            }
+            heading_ = 0.0;
+            model_ = {0.0, 0.0, r_, 0.0, 0.0, 0.0, 0.0};
+            psi_model_ = 0.0;
+            history_.clear();
+            next(Phase::DONUT, now);
+            send(kick_speed_, steer_cmd_.back(), now);
+          } else if (reverse_ > 0.0) {
+            heading_ = -face_angle_;    // the frame of the boxes' side: backing up parallel to it
+            x_ = 0.0;
+            left_x_.clear();
+            left_y_.clear();
+            scans_ = 0;
+            collecting_ = false;
+            window_back_ = -0.3;
+            window_front_ = 2.5;
+            RCLCPP_INFO(get_logger(), "backing up %.2f m along the boxes (at %.1f deg)", reverse_, face_angle_ * 180 / M_PI);
+            next(Phase::REVERSE, now);
+          } else {
+            heading_ = -face_angle_;    // from here on the frame of the boxes
+            next(Phase::STRAIGHT, now);
+          }
+        }
+        break;
+      case Phase::REVERSE: {
+        // straight back at REVERSE_SPEED, the heading held (backwards a positive heading wants a left steer), the
+        // distance from the wheels; then at rest the boxes and the parking as from a start
+        x_ += u_ * std::cos(heading_) * TICK;
+        if (-x_ >= reverse_ - REVERSE_STOP) {
+          send(0.0, 0.0, now);
+          RCLCPP_INFO(get_logger(), "backed up %.2f m, heading %.1f deg", -x_, heading_ * 180 / M_PI);
+          rest_ = now;
+          next(Phase::SETTLE, now);
+        } else if (t > reverse_ / REVERSE_SPEED + T_RAMP + 2.0) {
+          RCLCPP_ERROR(get_logger(), "%.2f m backed up in %.1f s: stop", -x_, t);
+          next(Phase::DONE, now);
+        } else {
+          const double d = std::atan(REVERSE_GAIN * heading_ * (lf_ + lr_) / REVERSE_SPEED);
+          send(-REVERSE_SPEED * std::min(1.0, t / T_RAMP), interp(d, steer_angle_, steer_cmd_), now);
+        }
+        break;
+      }
+      case Phase::DONUT: {
+        carry_model(now);
+        if (brake_timer_ && !brake_timer_->is_canceled()) {
+          break;    // the brake goes before the next step
+        }
+        const double due = (donut_turns_ * 2 * M_PI + donut_exit_ - donut_slide_ - heading_now_) / std::max(model_.r, 0.1) - steer_dead_;
+        if (t > T_DONUT * donut_turns_ + T_KICK) {
+          RCLCPP_ERROR(get_logger(), "heading %.0f deg after %.1f s of donut: stop", heading_now_ * 180 / M_PI, t);
+          next(Phase::DONE, now);
+        } else if (due <= 0) {
+          brake();
+        } else if (due < TICK) {
+          brake_timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(due), [this] { brake(); });
+        } else {
+          send(kick_speed_, steer_cmd_.back(), now);
+        }
+        break;
+      }
+      case Phase::SETTLE:
+        // braked to a stop (after the donut or backing up), then the scans at rest
+        send(0.0, donut_turns_ > 0 ? slide_ref_ : 0.0, now);
+        if (std::abs(u_) > 0.02 || std::abs(r_) > 0.05) {
+          rest_ = now;
+        } else if (donut_only_ && (now - rest_).seconds() > T_REST) {
+          relocalize(now);
+          break;
+        } else if (!collecting_ && (now - rest_).seconds() > T_REST) {
+          if (donut_turns_ > 0) {
+            RCLCPP_INFO(get_logger(), "donut braked at %.1f deg, stopped at %.1f deg (exit %.1f)", heading_brake_ * 180 / M_PI,
+              heading_ * 180 / M_PI, (donut_turns_ * 2 * M_PI + donut_exit_) * 180 / M_PI);
+          }
+          left_x_.clear();
+          left_y_.clear();
+          scans_ = 0;
+          collecting_ = true;
+        }
+        if (collecting_ && scans_ >= 5) {
+          collecting_ = false;
+          if (!plan_gap()) {
+            next(Phase::DONE, now);
+            break;
+          }
+          heading_ = -face_angle_;
+          x_ = y_ = 0.0;
           next(Phase::STRAIGHT, now);
+        } else if (t > T_SETTLE) {
+          RCLCPP_ERROR(get_logger(), "%.1f s at rest after the donut or backing up, no gap yet: stop", t);
+          next(Phase::DONE, now);
         }
         break;
       case Phase::STRAIGHT: {
-        // on the line of the start: position from the wheels and the gyro heading
+        // pure pursuit on the line: position from the wheels and the gyro heading
         x_ += WHEEL_SLIP * u_ * std::cos(heading_) * TICK;
         y_ += WHEEL_SLIP * u_ * std::sin(heading_) * TICK;
         heading_now_ = heading_;
-        const double ty = -std::sin(heading_) * LOOKAHEAD - std::cos(heading_) * y_;
-        const double d = std::atan(2 * (lf_ + lr_) * ty / (LOOKAHEAD * LOOKAHEAD + y_ * y_));
+        const double off = y_ - y_line_;
+        const double ty = -std::sin(heading_) * LOOKAHEAD - std::cos(heading_) * off;
+        const double d = std::atan(2 * (lf_ + lr_) * ty / (LOOKAHEAD * LOOKAHEAD + off * off));
         const double steer = interp(d, steer_angle_, steer_cmd_);
-        // where the car would stop kicking now, along the line
-        const double stop_x = x_ + std::cos(heading_) * kick_ahead_ - std::sin(heading_) * kick_left_;
-        if (stop_x >= mid_x_) {
+        // where the car would stop kicking now, along the line: kicked on the line, the stop follows from the kick
+        // point (turned with the car's heading it moved the wrong way: gymk_9, sim_gym3)
+        if (x_ + kick_ahead_ >= mid_x_) {
           if (t < T_RAMP) {
             RCLCPP_ERROR(get_logger(), "kick at %.3f m, before full speed: stop", x_);
+            next(Phase::DONE, now);
+            break;
+          }
+          if (std::abs(heading_) > KICK_ALIGN || std::abs(off) > KICK_OFF) {
+            RCLCPP_ERROR(get_logger(), "not on the line at the kick (%.3f m off, %.1f deg): stop", off, heading_ * 180 / M_PI);
             next(Phase::DONE, now);
             break;
           }
@@ -479,7 +726,7 @@ private:
       }
       case Phase::KICK: {
         carry_model(now);
-        if (brake_timer_) {
+        if (brake_timer_ && !brake_timer_->is_canceled()) {
           break;    // the brake goes before the next step
         }
         // from now until the brake is sent: it acts steer_dead later, the car turning at the rate of now
@@ -505,12 +752,15 @@ private:
         if (t > T_SLIDE) {
           RCLCPP_INFO(get_logger(), "braked at %.1f deg, stopped at %.1f deg (target %.1f)",
             heading_brake_ * 180 / M_PI, heading_now_ * 180 / M_PI, target_ * 180 / M_PI);
+          finished_ = true;
           next(Phase::DONE, now);
         }
         break;
       case Phase::DONE:
         send(0.0, 0.0, now);
-        arm(false);
+        if (!(donut_only_ && finished_)) {
+          arm(false);    // after the donut alone the next controller drives on
+        }
         if (t > 0.5) {
           rclcpp::shutdown();
         }
@@ -523,7 +773,7 @@ private:
     pub_state_->publish(s);
   }
 
-  enum class Phase { WAIT, ARM, STRAIGHT, KICK, SLIDE, DONE };
+  enum class Phase { WAIT, ARM, STRAIGHT, KICK, SLIDE, DONE, DONUT, SETTLE, REVERSE };
 
   void next(Phase p, const rclcpp::Time & now)
   {
@@ -535,17 +785,20 @@ private:
   double c_, mu_f_, b_f_, mu_r_, b_r_, lambda_, locked_, locked_y_, lt_x_, lt_y_, wheel_brake_, gyro_lag_, gyro_scale_, nf_, nr_;
   std::vector<double> steer_cmd_, steer_angle_;
   double speed_, kick_speed_, target_, kick_ahead_, kick_left_, side_in_, sweep_, slide_ref_, gap_min_, gap_max_;
-  bool slide_bisect_;
-  double slide_turn_;
+  bool slide_bisect_, collecting_, donut_only_, finished_ = false;
+  double slide_turn_, donut_exit_, donut_slide_, reverse_ = 0.0, window_back_ = -0.3, window_front_ = 2.5;
+  int64_t donut_turns_;
 
   Phase phase_ = Phase::WAIT;
   rclcpp::Time t_phase_{0, 0, RCL_ROS_TIME}, last_imu_{0, 0, RCL_ROS_TIME}, joints_t_{0, 0, RCL_ROS_TIME};
   std::vector<double> bias_samples_, left_x_, left_y_;
   int scans_ = 0;
-  double lidar_x_ = NAN, face_y_ = NAN, gap_from_ = NAN, gap_to_ = NAN, mid_x_ = NAN;
+  double lidar_x_ = NAN, face_y_ = NAN, face_angle_ = 0.0, gap_from_ = NAN, gap_to_ = NAN, mid_x_ = NAN, y_line_ = 0.0;
   double bias_ = 0.0, heading_ = 0.0, heading_now_ = 0.0, heading_brake_ = 0.0, r_ = 0.0, u_ = 0.0, joints_p_ = 0.0;
   double x_ = 0.0, y_ = 0.0, steer_ = 0.0, psi_model_ = 0.0, psi_then_ = 0.0;
-  rclcpp::Time corrected_imu_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time corrected_imu_{0, 0, RCL_ROS_TIME}, rest_{0, 0, RCL_ROS_TIME}, last_update_{0, 0, RCL_ROS_TIME};
+  double start_x_ = 0.0, start_y_ = 0.0, start_yaw_ = NAN;
+  int updates_ = 0;
   State model_{0, 0, 0, 0, 0, 0, 0};
   std::deque<Command> sent_;
   std::deque<Past> history_;
@@ -555,6 +808,8 @@ private:
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDrive>::SharedPtr pub_drive_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_arm_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_state_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_initial_;
+  rclcpp::Client<std_srvs::srv::Empty>::SharedPtr nomotion_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joints_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;
@@ -564,7 +819,8 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<GapNode>());
+  auto node = std::make_shared<GapNode>();
+  rclcpp::spin(node);
   rclcpp::shutdown();
-  return 0;
+  return node->finished() ? 0 : 1;    // 1: stopped before the end
 }

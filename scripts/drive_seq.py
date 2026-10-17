@@ -29,6 +29,11 @@ class DriveSeq(Node):
         self.v.append(0.0)
         self.s.append(self.s[-1])
 
+        # the car's subscriptions first: a new node is discovered 1-2 s late and its first commands are lost
+        t_wait = time.time() + 5.0
+        while (self.pub_drive.get_subscription_count() == 0 or self.pub_arm.get_subscription_count() == 0) \
+                and time.time() < t_wait:
+            time.sleep(0.05)
         self.t0 = time.time()
         self.timer = self.create_timer(0.02, self.tick)   # 50 Hz
 
