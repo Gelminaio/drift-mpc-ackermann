@@ -14,7 +14,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_lidar', default_value='true'),
-        DeclareLaunchArgument('use_camera', default_value='true'),
         DeclareLaunchArgument('use_odometry', default_value='true'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),   # true to replay a bag
         SetParameter(name='use_sim_time', value=LaunchConfiguration('use_sim_time')),
@@ -28,12 +27,6 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 PathJoinSubstitution([bringup, 'launch', 'lidar.launch.py'])),
             condition=IfCondition(LaunchConfiguration('use_lidar')),
-        ),
-
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                PathJoinSubstitution([bringup, 'launch', 'camera.launch.py'])),
-            condition=IfCondition(LaunchConfiguration('use_camera')),
         ),
 
         # the EKF owns odom -> base_footprint, so the odometry node does not publish it
