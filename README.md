@@ -94,7 +94,7 @@ Two computers on the car, a desktop for everything else:
 | Control | Nonlinear MPC via [`acados`](https://docs.acados.org/) on the identified dynamic model; Pure Pursuit as the baseline |
 | Parking | Lidar gap, arc-straight-arc approach, kick and gyro-timed brake |
 | Simulation | Gazebo Harmonic (`ros_gz`), identified dynamics in a C++ system plugin, adjustable friction |
-| Tooling | Docker, PlatformIO, colcon, GitHub Actions |
+| Tooling | PlatformIO, colcon, GitHub Actions |
 
 ---
 
@@ -105,7 +105,6 @@ drift-mpc-ackermann/
 ├── firmware/           # ESP32 firmware (PlatformIO)
 ├── ros2_ws/src/        # ROS 2 packages: description, odometry, control, nmpc, bringup, gazebo
 ├── setup/pi/           # Raspberry Pi: micro-ROS agent service, udev rule, ROS environment
-├── docker/             # Dockerfile and compose for the desktop
 ├── docs/               # Technical notes
 ├── notebooks/          # Identification, estimation, control and parking analysis
 ├── scripts/            # Track, paths, test and analysis utilities
