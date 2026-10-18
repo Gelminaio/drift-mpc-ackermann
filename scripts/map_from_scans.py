@@ -11,7 +11,8 @@ import lidar_path
 # reach it end in it often enough, floor where they pass through. Same grid and frame as maps/room.yaml, so the
 # start mark and the paths keep their coordinates. What moves between sessions (the boxes, the cones) is floor.
 # Run from scripts/: map_from_scans.py <out name> <run>...  -> <out name>.pgm/.yaml (the bags' laps start at rest
-# on the start mark)
+# on the start mark, maps/room); map_from_scans.py <out name> <run> --start <x> <y> <deg>: one drive by hand from
+# that pose on the map, its lidar path the one lidar_path.py stored, nothing masked (maps/room2)
 MAPS = '../ros2_ws/src/ackermann_bringup/maps'
 TAPE = (3.010, 0.350, np.radians(-45.9))    # the start mark on the map (AMCL's initial pose)
 R_MAX = 0.5          # rad/s, scans taken while turning faster are left out: the de-skew smears them
@@ -38,15 +39,14 @@ def lap(run):
     return start, stops[stops > start + 0.5][0] + 0.3
 
 
-def beams_on_map(run):
+def beams_on_map(run, start=TAPE, stored=False):
     # every kept beam: where the lidar was and where the beam ended, on the map
-    t0, t1 = lap(run)
-    L, G = lidar_path.path(run, t0, t1)
+    L, G = (read(run, 'lidar_path'), read(run, 'gyro_path')) if stored else lidar_path.path(run, *lap(run))
     L = L[L['share'] > SHARE_MIN]
     sc = read(run, 'scan')
     scan_time = np.median(np.diff(sc['stamp']))
     sc = sc.assign(stamp=sc['t'] - scan_time)
-    c, s = np.cos(TAPE[2]), np.sin(TAPE[2])
+    c, s = np.cos(start[2]), np.sin(start[2])
     origins, ends = [], []
     for tm in L['t']:
         p, t = lidar_path.beams(sc.iloc[np.argmin(np.abs(sc['stamp'] + scan_time / 2 - tm))], scan_time)
@@ -56,13 +56,13 @@ def beams_on_map(run):
         x, y = np.interp(t, L['t'], L['x']), np.interp(t, L['t'], L['y'])
         lx, ly = x + np.cos(h) * lidar_path.LIDAR_X, y + np.sin(h) * lidar_path.LIDAR_X
         ex, ey = x + np.cos(h) * p[:, 0] - np.sin(h) * p[:, 1], y + np.sin(h) * p[:, 0] + np.cos(h) * p[:, 1]
-        # from the start mark's frame to the map's
-        origins.append(np.c_[TAPE[0] + c * lx - s * ly, TAPE[1] + s * lx + c * ly])
-        ends.append(np.c_[TAPE[0] + c * ex - s * ey, TAPE[1] + s * ex + c * ey])
+        # from the start's frame to the map's
+        origins.append(np.c_[start[0] + c * lx - s * ly, start[1] + s * lx + c * ly])
+        ends.append(np.c_[start[0] + c * ex - s * ey, start[1] + s * ex + c * ey])
     return np.vstack(origins), np.vstack(ends)
 
 
-def main(out, runs):
+def main(out, runs, start=TAPE, stored=False):
     meta = dict(l.split(': ', 1) for l in open(f'{MAPS}/room.yaml').read().splitlines() if ': ' in l)
     res = float(meta['resolution'])
     ox, oy = [float(v) for v in meta['origin'].strip('[]').split(',')[:2]]
@@ -73,7 +73,7 @@ def main(out, runs):
 
     hits, passes = np.zeros(nr * nc, int), np.zeros(nr * nc, int)
     for run in runs:
-        o, e = beams_on_map(run)
+        o, e = beams_on_map(run, start, stored)
         for i in range(0, len(o), 5000):
             oo, ee = o[i:i + 5000], e[i:i + 5000]
             # the cells a beam passes through: points every half cell up to half a cell before its end, one pass per
@@ -94,14 +94,15 @@ def main(out, runs):
     img[passes > 0] = 254
     img[(hits >= HITS_MIN) & (hits >= HIT_SHARE * reached)] = 0
     img = img.reshape(nr, nc)
-    # the moving objects as floor
-    rows, cols = np.mgrid[0:nr, 0:nc]
-    x, y = ox + (cols + 0.5) * res - TAPE[0], oy + (nr - rows - 0.5) * res - TAPE[1]
-    ahead, left = np.cos(TAPE[2]) * x + np.sin(TAPE[2]) * y, -np.sin(TAPE[2]) * x + np.cos(TAPE[2]) * y
-    moving = (ahead > BOXES[0]) & (ahead < BOXES[1]) & (left > BOXES[2]) & (left < BOXES[3])
-    for cx, cy in CONES:
-        moving |= np.hypot(ahead - cx, left - cy) < CONE_R
-    img[moving] = 254
+    if not stored:
+        # the moving objects of the laps as floor
+        rows, cols = np.mgrid[0:nr, 0:nc]
+        x, y = ox + (cols + 0.5) * res - TAPE[0], oy + (nr - rows - 0.5) * res - TAPE[1]
+        ahead, left = np.cos(TAPE[2]) * x + np.sin(TAPE[2]) * y, -np.sin(TAPE[2]) * x + np.cos(TAPE[2]) * y
+        moving = (ahead > BOXES[0]) & (ahead < BOXES[1]) & (left > BOXES[2]) & (left < BOXES[3])
+        for cx, cy in CONES:
+            moving |= np.hypot(ahead - cx, left - cy) < CONE_R
+        img[moving] = 254
     cv2.imwrite(f'{out}.pgm', img)
     with open(f'{out}.yaml', 'w') as f:
         f.write(f'image: {out.split("/")[-1]}.pgm\nmode: trinary\nresolution: {res:.3f}\norigin: [{ox:.3f}, {oy:.3f}, 0]\n'
@@ -110,4 +111,8 @@ def main(out, runs):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2:])
+    if '--start' in sys.argv:
+        x, y, deg = [float(v) for v in sys.argv[sys.argv.index('--start') + 1:][:3]]
+        main(sys.argv[1], [sys.argv[2]], (x, y, np.radians(deg)), stored=True)
+    else:
+        main(sys.argv[1], sys.argv[2:])
