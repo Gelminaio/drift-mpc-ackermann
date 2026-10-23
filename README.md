@@ -7,9 +7,7 @@
 A 1:10 car that finds a gap between two boxes with its lidar, drives to it with a **nonlinear MPC** running on its
 Raspberry Pi, and **slides into it sideways**: a gap of 1.8 car lengths, on a tiled floor.
 
-<p align="center">
-  <img src="media/vehicle_photos/01_hero.jpg" alt="Vehicle Hero Shot" width="65%"/>
-</p>
+Technical report: [`report/report.pdf`](report/report.pdf) (6 pages, LaTeX source in [`report/`](report/)).
 
 ---
 
@@ -30,6 +28,10 @@ parking, ten clean takes. The whole stack runs on ROS 2 Jazzy across an ESP32 an
 ---
 
 ## Vehicle Platform
+
+<p align="center">
+  <img src="media/vehicle_photos/01_hero.jpg" alt="Vehicle Hero Shot" width="65%"/>
+</p>
 
 <table align="center">
   <tr>
@@ -106,6 +108,7 @@ drift-mpc-ackermann/
 ├── ros2_ws/src/        # ROS 2 packages: description, odometry, control, nmpc, bringup, gazebo
 ├── setup/pi/           # Raspberry Pi: micro-ROS agent service, udev rule, ROS environment
 ├── docs/               # Technical notes
+├── report/             # Technical report: LaTeX source and PDF
 ├── notebooks/          # Identification, estimation, control and parking analysis
 ├── scripts/            # Track, paths, test and analysis utilities
 ├── media/              # Diagrams, photos, figures
@@ -162,13 +165,22 @@ The project is structured in 12 incremental phases, from the hardware to the fin
 - [x] **Phase 9** — Nonlinear MPC at the limit of adhesion (acados), on the Pi
 - [x] **Phase 10** — Drift around a cone: drift NMPC and friction from the drift in Gazebo; on the car the drift does not hold
 - [x] **Phase 11** — Handbrake parking between two boxes, steered in the slide
-- [ ] **Phase 12** — Sideways gap parking, parking anywhere, the one-take gymkhana; video and report
+- [x] **Phase 12** — Sideways gap parking, parking anywhere, the one-take gymkhana; video and report
 
 Track progress via [GitHub Milestones](../../milestones).
 
 ---
 
 ## Results
+
+### Phases 3-4 — Firmware and ROS 2 bridge
+
+- Wheel speed PID on the ESP32 at 100 Hz, gains tuned by hand on step responses:
+  [`notebooks/pid_tuning.ipynb`](notebooks/pid_tuning.ipynb).
+- The car on battery, driven over Wi-Fi with RViz live: /odom 49 Hz, /scan 7.1 Hz. Wi-Fi cut at 0.5 m/s: it stops
+  by itself in 0.34 m, the 500 ms command timeout plus the soft-stop ramp. [`docs/phase4_demo.md`](docs/phase4_demo.md).
+- Bags extracted to parquet on the Pi ([`scripts/bag_extract.py`](scripts/bag_extract.py)) and checked across sensors:
+  the IMU's lateral acceleration against v·ω from the odometry, [`notebooks/pipeline_test.ipynb`](notebooks/pipeline_test.ipynb).
 
 ### Phase 5 — System identification
 
@@ -320,7 +332,7 @@ If you use this work, please cite:
     title  = {Autonomous Drift Parking with Lidar and Nonlinear MPC on a 1:10 Ackermann Car},
     author = {Gelmini, Pietro},
     year   = {2026},
-    note   = {Work in progress},
+    note   = {Technical report},
     url    = {https://github.com/Gelminaio/drift-mpc-ackermann}
 }
 ```
@@ -337,7 +349,3 @@ This project is released under the [MIT License](LICENSE).
 
 **Pietro Gelmini** — [gelmini.pietro@gmail.com](mailto:gelmini.pietro@gmail.com)
 LinkedIn: [https://www.linkedin.com/in/pietro-gelmini/](https://www.linkedin.com/in/pietro-gelmini/)
-
----
-
-*This is an active research/engineering project. Architecture, methodology, and results are subject to change as work progresses.*
