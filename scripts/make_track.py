@@ -7,7 +7,8 @@ from scipy import ndimage
 
 # racing line on maps/room: the largest rounded rectangle that keeps CLEAR from every
 # obstacle, counterclockwise, with a speed profile. Run from the repo root.
-# Another line: make_track.py <R> <V_MAX> <A_LAT> <name>, written to maps/room_<name>.csv
+# Another line: make_track.py <R> <V_MAX> <A_LAT> <name>, written to maps/room_<name>.csv; on another map and
+# placed by hand (no search): make_track.py <R> <V_MAX> <A_LAT> <name> <map> <lx> <ly> <deg> <cx> <cy>
 MAP = 'ros2_ws/src/ackermann_bringup/maps/room'
 R = 0.6         # m, corner radius, twice the car's minimum (0.31 m)
 CLEAR = 0.5     # m from any occupied or unknown cell
@@ -16,8 +17,12 @@ V_MAX = 1.0     # m/s, baseline speed cap (motors: 1.2)
 A_LAT = 1.0     # m/s2, ~40% of the rear grip (0.276 g): no drift
 A_LONG = 0.8    # m/s2, speeding up and braking
 NAME = 'track'
+PLACE = None
 if len(sys.argv) > 1:
     R, V_MAX, A_LAT, NAME = float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
+if len(sys.argv) > 5:
+    MAP = f'ros2_ws/src/ackermann_bringup/maps/{sys.argv[5]}'
+    PLACE = tuple(float(v) for v in sys.argv[6:11])
 
 
 def rounded_rect(lx, ly):
@@ -69,15 +74,16 @@ def first_fit(P):
     return None
 
 
-# every size that could be longer than the best so far
-best = None
-for lx in np.arange(1.8, 4.01, 0.1):
-    for ly in np.arange(1.4, lx + 0.01, 0.1):
-        if best and lx + ly <= best[0] + best[1]:
-            continue
-        fit = first_fit(rounded_rect(lx, ly)[0])
-        if fit:
-            best = (lx, ly, *fit)
+# every size that could be longer than the best so far, unless placed by hand
+best = PLACE
+if PLACE is None:
+    for lx in np.arange(1.8, 4.01, 0.1):
+        for ly in np.arange(1.4, lx + 0.01, 0.1):
+            if best and lx + ly <= best[0] + best[1]:
+                continue
+            fit = first_fit(rounded_rect(lx, ly)[0])
+            if fit:
+                best = (lx, ly, *fit)
 
 lx, ly, deg, cx, cy = best
 P, kappa = rounded_rect(lx, ly)

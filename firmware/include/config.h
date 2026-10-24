@@ -122,7 +122,7 @@ constexpr uint32_t SAFETY_TWDT_TIMEOUT_S = 1; // chip resets if a task starves >
 // Task timing (periods in ms)
 constexpr uint32_t PERIOD_MOTOR_CONTROL_MS = 10;
 constexpr uint32_t PERIOD_IMU_MS = 5; // polling frequency (diffent from IMU_REPORT_INTERVAL_MS)
-constexpr uint32_t PERIOD_COMMS_MS = 20;
+constexpr uint32_t PERIOD_COMMS_MS = 5;  // each spin takes one /drive: at 20 ms they queued behind (sideways.ipynb)
 constexpr uint32_t PERIOD_SAFETY_MS = 20;
 constexpr uint32_t PERIOD_TELEMETRY_MS = 20; // 50hz (temp, will be changed)
 

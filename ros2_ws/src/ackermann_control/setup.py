@@ -17,11 +17,6 @@ setup(
     maintainer_email='gelmini.pietro@gmail.com',
     description='Track following controllers',
     license='MIT',
-    extras_require={
-        'test': [
-            'pytest',
-        ],
-    },
     entry_points={
         'console_scripts': [
             'pure_pursuit_node = ackermann_control.pure_pursuit_node:main',

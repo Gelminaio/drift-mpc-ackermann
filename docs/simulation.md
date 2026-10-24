@@ -55,7 +55,7 @@ the load of the slide. The model has no motor torque limit.
 The Phase 7 session with the same nodes and parameters, started in the order used on the Pi:
 
     ros2 launch ackermann_gazebo sim.launch.py
-    ros2 launch ackermann_bringup robot.launch.py use_sim_time:=true use_lidar:=false use_camera:=false
+    ros2 launch ackermann_bringup robot.launch.py use_sim_time:=true use_lidar:=false
     ros2 launch ackermann_bringup localization.launch.py use_sim_time:=true
     ros2 topic pub -w 1 -t 10 -r 10 /arm std_msgs/msg/Bool "{data: true}"
     ros2 launch ackermann_bringup pure_pursuit.launch.py use_sim_time:=true speed_scale:=0.6
@@ -73,6 +73,15 @@ on the real runs, and in the sim against the truth:
 Lap times, AMCL (6.8 Hz, same spread) and the stop past the line (9-21 cm, real 10-15) match.
 The sim runs 3-5 cm wide in the corners, where it turns 4-6% less at the same command: the
 open loop deficit above.
+
+## Boxes and cones
+
+`models/box.sdf` and `models/box_b.sdf` (the parking's boxes, 32 x 36 and 47.5 x 30 cm), `models/cone.sdf` (the
+2.1 cm tube of Phase 10), put into the running world where they stand:
+
+    ros2 run ros_gz_sim create -file <share>/ackermann_gazebo/models/box.sdf -name box_a -x <x> -y <y> -Y <yaw>
+
+`sim.launch.py world:=room2 x:=2.9437 y:=-0.7015 yaw:=0.7429` starts the car on the start mark of the camera's room.
 
 ## Friction
 
