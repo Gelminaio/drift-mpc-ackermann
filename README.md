@@ -7,13 +7,9 @@
 A 1:10 car that finds a gap between two boxes with its lidar, drives to it with a **nonlinear MPC** running on its
 Raspberry Pi, and **slides into it sideways**: a gap of 1.8 car lengths, on a tiled floor.
 
-<p align="center">
-  <a href="https://github.com/Gelminaio/drift-mpc-ackermann/releases/download/phase-12/drift_parking.mp4">
-    <img src="media/drift_parking.webp" alt="The car sliding sideways into a 47 cm gap between two boxes" width="90%"/>
-  </a>
-</p>
+https://github.com/user-attachments/assets/009ad60d-790f-4bcf-9768-98fb54df204d
 
-Video: [`drift_parking.mp4`](https://github.com/Gelminaio/drift-mpc-ackermann/releases/download/phase-12/drift_parking.mp4)
+Video in 1080p60: [`drift_parking.mp4`](https://github.com/Gelminaio/drift-mpc-ackermann/releases/download/phase-12/drift_parking.mp4)
 (2:09; music "Tears in Rain" by Scott Buckley, CC BY 4.0). Technical report: [`report/report.pdf`](report/report.pdf)
 (6 pages, LaTeX source in [`report/`](report/)).
 
