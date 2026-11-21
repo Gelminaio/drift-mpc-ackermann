@@ -34,6 +34,10 @@ jobs:
         working-directory: firmware
         run: pio run -e ci
 
+      - name: Unit tests of the control library (on the host)
+        working-directory: firmware
+        run: pio test -e native
+
   ros2-build:
     name: ROS 2 Packages (colcon)
     runs-on: ubuntu-latest
@@ -87,3 +91,11 @@ jobs:
         run: |
           source /opt/ros/jazzy/setup.bash
           colcon build --event-handlers console_direct+
+
+      - name: Unit tests of the model and the NMPC
+        env:
+          ACADOS_SOURCE_DIR: /opt/acados
+          LD_LIBRARY_PATH: /opt/acados/lib
+        run: |
+          apt-get install -y python3-pytest python3-scipy
+          python3 -m pytest tests -v
