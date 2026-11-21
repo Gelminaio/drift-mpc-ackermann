@@ -156,6 +156,19 @@ ros2 launch ackermann_bringup valet.launch.py map:=room2
 The micro-ROS agent runs as a systemd service on the Pi, see [`setup/pi/`](setup/pi/). The same launch files run in
 Gazebo with `use_sim_time:=true`, see [`docs/simulation.md`](docs/simulation.md).
 
+### Tests
+
+```bash
+# the PID and the safety supervisor of the firmware, on the PC
+cd firmware && pio test -e native
+
+# the vehicle model, the NMPC model, the friction estimate and the NMPC solver in closed loop
+# (the solver test needs acados, see docs/nmpc.md; without it, it is skipped)
+python3 -m pytest tests -v
+```
+
+Both run in CI ([`.github/workflows/build.yml`](.github/workflows/build.yml)).
+
 ---
 
 ## Project Roadmap
