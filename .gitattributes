@@ -1,0 +1,4 @@
+# Language statistics: the analysis notebooks and the LaTeX report are documentation,
+# the source is the C++ and Python under firmware/, ros2_ws/ and scripts/
+*.ipynb linguist-documentation
+report/** linguist-documentation

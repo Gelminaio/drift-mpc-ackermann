@@ -4,6 +4,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-blue)](https://docs.ros.org/en/jazzy/)
 
+<p align="center">
+  <img src="media/drift_parking_47cm.gif" alt="The car slides sideways into a 47 cm gap between two boxes, at real speed" width="720"/>
+</p>
+
 A 1:10 car that finds a gap between two boxes with its lidar, drives to it with a **nonlinear MPC** running on its
 Raspberry Pi, and **slides into it sideways**: a gap of 1.8 car lengths, on a tiled floor.
 

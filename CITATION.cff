@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it as below."
+title: "Autonomous Drift Parking with Lidar and Nonlinear MPC on a 1:10 Ackermann Car"
+type: software
+authors:
+  - family-names: Gelmini
+    given-names: Pietro
+repository-code: "https://github.com/Gelminaio/drift-mpc-ackermann"
+license: MIT
+date-released: "2026-10-24"
+keywords:
+  - nonlinear model predictive control
+  - acados
+  - autonomous drifting
+  - ROS 2
+  - system identification
+  - state estimation
+preferred-citation:
+  type: report
+  title: "Autonomous Drift Parking with Lidar and Nonlinear MPC on a 1:10 Ackermann Car"
+  authors:
+    - family-names: Gelmini
+      given-names: Pietro
+  year: 2026
+  notes: "Technical report"
+  url: "https://github.com/Gelminaio/drift-mpc-ackermann"
